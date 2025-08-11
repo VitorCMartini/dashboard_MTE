@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 from math import log
+import locale
 
 # Configuração da página
 st.set_page_config(
@@ -12,6 +13,117 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ===============================================
+# FUNÇÕES DE FORMATAÇÃO BRASILEIRA (ABNT)
+# ===============================================
+
+def formatar_numero_br(numero, decimais=2):
+    """
+    Formata números seguindo padrão brasileiro (ABNT):
+    - Vírgula como separador decimal
+    - Ponto como separador de milhares
+    """
+    try:
+        if pd.isna(numero) or numero is None:
+            return "N/A"
+        
+        # Converter para float se necessário
+        num = float(numero)
+        
+        # Formatação manual para garantir padrão brasileiro
+        if decimais == 0:
+            # Para números inteiros
+            numero_str = f"{int(num):,}".replace(",", ".")
+        else:
+            # Para números com decimais
+            numero_str = f"{num:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
+        return numero_str
+    except (ValueError, TypeError):
+        return str(numero)
+
+def formatar_porcentagem_br(numero, decimais=1):
+    """
+    Formata porcentagens seguindo padrão brasileiro:
+    - Vírgula como separador decimal
+    - Símbolo % após o número
+    """
+    try:
+        if pd.isna(numero) or numero is None:
+            return "N/A"
+        
+        num = float(numero)
+        return f"{formatar_numero_br(num, decimais)}%"
+    except (ValueError, TypeError):
+        return str(numero)
+
+def formatar_area_br(area_ha):
+    """
+    Formata área em hectares seguindo padrão brasileiro
+    """
+    try:
+        if pd.isna(area_ha) or area_ha is None:
+            return "N/A"
+        
+        area = float(area_ha)
+        return f"{formatar_numero_br(area, 2)} ha"
+    except (ValueError, TypeError):
+        return str(area_ha)
+
+def formatar_densidade_br(densidade):
+    """
+    Formata densidade seguindo padrão brasileiro
+    """
+    try:
+        if pd.isna(densidade) or densidade is None:
+            return "N/A"
+        
+        dens = float(densidade)
+        return f"{formatar_numero_br(dens, 1)} ind/ha"
+    except (ValueError, TypeError):
+        return str(densidade)
+
+def formatar_dataframe_br(df, colunas_numericas=None, colunas_porcentagem=None):
+    """
+    Aplica formatação brasileira a um DataFrame para exibição
+    """
+    df_formatado = df.copy()
+    
+    if colunas_numericas:
+        for col in colunas_numericas:
+            if col in df_formatado.columns:
+                df_formatado[col] = df_formatado[col].apply(lambda x: formatar_numero_br(x, 2) if pd.notna(x) else "N/A")
+    
+    if colunas_porcentagem:
+        for col in colunas_porcentagem:
+            if col in df_formatado.columns:
+                df_formatado[col] = df_formatado[col].apply(lambda x: formatar_porcentagem_br(x, 2) if pd.notna(x) else "N/A")
+    
+    return df_formatado
+
+def metric_compacta(label, value, help_text=None):
+    """
+    Cria uma métrica compacta com tamanho de fonte otimizado
+    """
+    help_html = f"<span title='{help_text}'>ⓘ</span>" if help_text else ""
+    
+    st.markdown(f"""
+    <div style="
+        background-color: rgba(28, 131, 225, 0.1);
+        padding: 8px;
+        border-radius: 5px;
+        border-left: 4px solid #1c83e1;
+        margin-bottom: 8px;
+    ">
+        <div style="font-size: 11px; color: #666; font-weight: 600; margin-bottom: 2px;">
+            {label} {help_html}
+        </div>
+        <div style="font-size: 14px; font-weight: 700; color: #1c83e1; line-height: 1.1;">
+            {value}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # Função para limpeza e padronização de dados
 def limpar_e_padronizar_dados(df):
@@ -76,41 +188,47 @@ def show_descriptive_stats(df_carac, df_inv, title):
             cod_parc_col = encontrar_coluna(df_carac, ['cod_parc', 'parcela', 'plot'])
             if cod_parc_col:
                 num_parcelas = df_carac[cod_parc_col].nunique()
-                st.metric("Número de Parcelas", num_parcelas)
+                metric_compacta("Nº Parcelas", formatar_numero_br(num_parcelas, 0))
             else:
-                st.metric("Número de Parcelas", "N/A")
+                metric_compacta("Nº Parcelas", "N/A")
         
         with col2:
             # Área amostrada usando método adaptativo
             if len(df_carac) > 0:
                 area_ha, metodo = calcular_area_amostrada(df_carac, df_inv)
-                st.metric("Área Amostrada (ha)", f"{area_ha:.2f}", help=f"Método: {metodo}")
+                metric_compacta("Área Amostr.", formatar_area_br(area_ha), f"Método: {metodo}")
             else:
-                st.metric("Área Amostrada (ha)", "N/A")
+                metric_compacta("Área Amostr.", "N/A")
         
         with col3:
-            # Cobertura de copa média
+            # Cobertura de copa média - mesma lógica dos indicadores ambientais
             cobertura_col = encontrar_coluna(df_carac, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
             if cobertura_col:
+                # Aplicar a mesma lógica simples e direta
                 cobertura_media = pd.to_numeric(df_carac[cobertura_col], errors='coerce').mean()
+                
                 # Converter de 0-1 para 0-100% se necessário
-                if cobertura_media <= 1:
+                if pd.notna(cobertura_media) and cobertura_media <= 1:
                     cobertura_media = cobertura_media * 100
-                st.metric("Cobertura de Copa (%)", f"{cobertura_media:.1f}")
+                
+                if pd.notna(cobertura_media):
+                    metric_compacta("Cob. Copa", formatar_porcentagem_br(cobertura_media, 2))
+                else:
+                    metric_compacta("Cob. Copa", "N/A")
             else:
-                st.metric("Cobertura de Copa (%)", "N/A")
+                metric_compacta("Cob. Copa", "N/A")
         
         # Estatísticas detalhadas para Caracterização
-        st.write("**Indicadores Ambientais:**")
+        st.markdown("<div style='font-size:18px; font-weight:bold; margin-bottom:8px; color:#1c83e1'>Indicadores Ambientais:</div>", unsafe_allow_html=True)
         
-        # Lista de métricas para caracterização
+        # Lista de métricas para caracterização - usando colunas corretas com (%)
         metricas_carac = [
-            (['graminea'], 'Gramíneas (%)'),
-            (['herbacea', 'herbac'], 'Herbáceas (%)'),
-            (['solo_exposto', 'solo exposto'], 'Solo Exposto (%)'),
-            (['palhada'], 'Palhada (%)'),
-            (['serapilheira'], 'Serapilheira (%)'),
-            (['cobetura_exotica', 'cobertura_exotica'], 'Cobertura Exótica (%)')
+            (['(%)graminea', '(%) graminea', 'graminea'], 'Gramíneas'),
+            (['(%)herbacea', '(%) herbacea', '(%) herbac', 'herbacea'], 'Herbáceas'),
+            (['(%)solo exposto', '(%) solo exposto', 'solo exposto'], 'Solo Exposto'),
+            (['(%)palhada', '(%) palhada', 'palhada'], 'Palhada'),
+            (['(%)serapilheira', '(%) serapilheira', 'serapilheira'], 'Serapilheira'),
+            (['(%)cobetura_exotica', '(%) cobetura_exotica', '(%)cobertura_exotica', '(%) cobertura_exotica'], 'Cobertura Exótica')
         ]
         
         # Dividir em duas colunas
@@ -122,20 +240,26 @@ def show_descriptive_stats(df_carac, df_inv, title):
             
             if col_name:
                 with current_col:
+                    # Calcular a média e converter de 0-1 para 0-100%
                     media = pd.to_numeric(df_carac[col_name], errors='coerce').mean()
-                    st.markdown(f"<small>• <b>{label}</b>: {media:.1f}%</small>", unsafe_allow_html=True)
+                    
+                    # Converter de 0-1 para 0-100% (as colunas com (%) também estão em formato 0-1)
+                    if pd.notna(media):
+                        media_percentual = media * 100
+                        st.markdown(f"<div style='font-size:16px; line-height:1.4'>• <b>{label}</b>: {formatar_porcentagem_br(media_percentual, 2)}</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<div style='font-size:16px; line-height:1.4'>• <b>{label}</b>: N/A</div>", unsafe_allow_html=True)
         
-        # Contagens de distúrbios
+        # Contagens de distúrbios - restaurar nomes completos
         st.markdown("---")
-        st.write("**Contagem de Distúrbios:**")
+        st.markdown("<div style='font-size:18px; font-weight:bold; margin-bottom:8px; color:#1c83e1'>Distúrbios:</div>", unsafe_allow_html=True)
         disturbios = [
-            (['erosiv'], 'Processos Erosivos'),
-            (['animais_domest', 'domesticos'], 'Animais Domésticos'),
-            (['formiga', 'cupins'], 'Formigas/Cupins'),
-            (['fogo'], 'Fogo'),
-            (['corte', 'madeira'], 'Corte de Madeira'),
-            (['inunda'], 'Inundação'),
-            (['animais_simplif'], 'Animais Simplificado')
+            (['Erosao_simplificada', 'erosao_simplificada'], 'Processos Erosivos'),
+            (['Fogo', 'fogo'], 'Fogo'),
+            (['Corte de madeira', 'corte de madeira'], 'Corte de Madeira'),
+            (['Inundação', 'inundacao', 'inundação'], 'Inundação'),
+            (['Animais_simplificado', 'animais_simplificado'], 'Animais Silvestres'),
+            (['Formigas(simplificado)', 'formigas(simplificado)', 'formigas_simplificado'], 'Formigas')
         ]
         
         # Dividir distúrbios em duas colunas também
@@ -146,44 +270,51 @@ def show_descriptive_stats(df_carac, df_inv, title):
             current_col = dist_col1 if i % 2 == 0 else dist_col2
             
             if col_name:
-                # Conta valores que indicam presença (não são nulos, vazios, 'não', 'nao', '0')
-                count = df_carac[col_name].dropna()
-                count = count[count.astype(str).str.lower() != 'não']
-                count = count[count.astype(str).str.lower() != 'nao']
-                count = count[count.astype(str) != '0']
-                count = count[count.astype(str) != '']
+                # Conta valores que indicam presença (valor 1)
+                valores = pd.to_numeric(df_carac[col_name], errors='coerce')
+                count = (valores == 1).sum()
                 
                 with current_col:
-                    st.markdown(f"<small>• <b>{label}</b>: {len(count)} ocorrências</small>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:16px; line-height:1.4'>• <b>{label}</b>: {count}</div>", unsafe_allow_html=True)
     
     elif title == "Inventário":
         # Métricas específicas para BD_inventario
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Riqueza (espécies únicas)
+            # Riqueza (espécies únicas, excluindo "Morto")
             especies_col = encontrar_coluna(df_inv, ['especies', 'especie', 'species', 'sp'])
             if especies_col and len(df_inv) > 0:
-                riqueza = df_inv[especies_col].nunique()
-                st.metric("Riqueza (Espécies)", riqueza)
+                # Filtrar espécies válidas (remover "Morto/Morta")
+                df_especies_validas = df_inv[~df_inv[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+                riqueza_total = df_especies_validas[especies_col].nunique()
+                
+                # Riqueza de espécies nativas
+                origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
+                if origem_col:
+                    df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+                    riqueza_nativas = df_nativas[especies_col].nunique()
+                    metric_compacta("Riqueza", f"{riqueza_total} ({riqueza_nativas} nat.)")
+                else:
+                    metric_compacta("Riqueza", str(riqueza_total))
             else:
-                st.metric("Riqueza (Espécies)", 0)
+                metric_compacta("Riqueza", "0")
         
         with col2:
             # Densidade geral de indivíduos
             if len(df_inv) > 0 and len(df_carac) > 0:
                 densidade_geral, metodo = calcular_densidade_geral(df_inv, df_carac)
-                st.metric("Densidade Geral (ind/ha)", f"{densidade_geral:.1f}", help=f"Método: {metodo}")
+                metric_compacta("Dens. Geral", formatar_densidade_br(densidade_geral), f"Método: {metodo}")
             else:
-                st.metric("Densidade Geral (ind/ha)", "0.0")
+                metric_compacta("Dens. Geral", formatar_densidade_br(0))
         
         with col3:
             # Densidade de indivíduos regenerantes
             if len(df_inv) > 0 and len(df_carac) > 0:
                 densidade = calcular_densidade_regenerantes(df_inv, df_carac)
-                st.metric("Densidade Regenerantes (ind/ha)", f"{densidade:.1f}")
+                metric_compacta("Dens. Regen.", formatar_densidade_br(densidade))
             else:
-                st.metric("Densidade Regenerantes (ind/ha)", "0.0")
+                metric_compacta("Dens. Regen.", formatar_densidade_br(0))
         
         with col4:
             # Altura média
@@ -191,17 +322,17 @@ def show_descriptive_stats(df_carac, df_inv, title):
             if ht_col and len(df_inv) > 0:
                 altura_media = pd.to_numeric(df_inv[ht_col], errors='coerce').mean()
                 if pd.notna(altura_media):
-                    st.metric("Altura Média (m)", f"{altura_media:.2f}")
+                    metric_compacta("Alt. Média", f"{formatar_numero_br(altura_media, 2)} m")
                 else:
-                    st.metric("Altura Média (m)", "N/A")
+                    metric_compacta("Alt. Média", "N/A")
             else:
-                st.metric("Altura Média (m)", "N/A")
+                metric_compacta("Alt. Média", "N/A")
         
         # Estatísticas detalhadas para Inventário
         if len(df_inv) > 0:
-            st.write("**Distribuição por Categorias:**")
+            st.markdown("<div style='font-size:18px; font-weight:bold; margin-bottom:8px; color:#1c83e1'>Distribuição por Categorias:</div>", unsafe_allow_html=True)
             
-            # Lista de colunas para análise percentual (incluindo Ameaça MMA)
+            # Lista de colunas para análise percentual - nomes completos
             cols_percentual = [
                 (['g_func', 'grupo_func', 'funcional'], 'Grupo Funcional'),
                 (['g_suc', 'grupo_suc', 'sucessional'], 'Grupo Sucessional'),
@@ -227,7 +358,7 @@ def show_descriptive_stats(df_carac, df_inv, title):
                 
                 if col_name and col_name in df_inv.columns:
                     with current_col:
-                        st.markdown(f"<small><b>{label}:</b></small>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size:18px; font-weight:bold; margin-bottom:8px; color:#1c83e1'>{label}:</div>", unsafe_allow_html=True)
                         
                         # Tratamento especial para Ameaça MMA (contagem de plaquetas únicas)
                         if label == 'Ameaça MMA' and plaqueta_col:
@@ -235,18 +366,18 @@ def show_descriptive_stats(df_carac, df_inv, title):
                                 ameaca_dist = df_inv.groupby(col_name)[plaqueta_col].nunique()
                                 
                                 if len(ameaca_dist) > 0:
-                                    # Mostrar apenas top 3 para economizar espaço
+                                    # Mostrar apenas top 3 (aumentamos de 2 para 3)
                                     for categoria, count in ameaca_dist.head(3).items():
-                                        st.markdown(f"<small>• {categoria}: {count} plaquetas</small>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='font-size:16px; line-height:1.4'>• {categoria}: {count} plaquetas</div>", unsafe_allow_html=True)
                                     
                                     # Se houver mais categorias, mostrar quantas são
                                     if len(ameaca_dist) > 3:
                                         outros = len(ameaca_dist) - 3
-                                        st.markdown(f"<small>• +{outros} outras categorias</small>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='font-size:16px; line-height:1.4'>• +{outros} outras categorias</div>", unsafe_allow_html=True)
                                 else:
-                                    st.markdown(f"<small>• Nenhum dado disponível</small>", unsafe_allow_html=True)
+                                    st.markdown(f"<div style='font-size:16px; line-height:1.4'>• Nenhum dado disponível</div>", unsafe_allow_html=True)
                             except Exception as e:
-                                st.markdown(f"<small>• Erro no cálculo</small>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='font-size:16px; line-height:1.4'>• Erro no cálculo</div>", unsafe_allow_html=True)
                         
                         else:
                             # Tratamento normal para outras categorias (percentual)
@@ -254,23 +385,22 @@ def show_descriptive_stats(df_carac, df_inv, title):
                                 dist = df_inv[col_name].value_counts(normalize=True) * 100
                                 
                                 if len(dist) > 0:
-                                    # Mostrar apenas top 3 para economizar espaço
+                                    # Mostrar top 3 (aumentamos de 2 para 3)
                                     for categoria, perc in dist.head(3).items():
-                                        st.markdown(f"<small>• {categoria}: {perc:.1f}%</small>", unsafe_allow_html=True)
+                                        # Não abreviar mais - mostrar categoria completa
+                                        st.markdown(f"<div style='font-size:16px; line-height:1.4'>• {categoria}: {formatar_porcentagem_br(perc, 1)}</div>", unsafe_allow_html=True)
                                     
                                     # Se houver mais categorias, mostrar quantas são
                                     if len(dist) > 3:
                                         outros = len(dist) - 3
-                                        st.markdown(f"<small>• +{outros} outras categorias</small>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='font-size:16px; line-height:1.4'>• +{outros} outras categorias</div>", unsafe_allow_html=True)
                                 else:
-                                    st.markdown(f"<small>• Nenhum dado disponível</small>", unsafe_allow_html=True)
+                                    st.markdown(f"<div style='font-size:16px; line-height:1.4'>• Nenhum dado disponível</div>", unsafe_allow_html=True)
                             except Exception as e:
-                                st.markdown(f"<small>• Erro no cálculo</small>", unsafe_allow_html=True)
-                        
-                        st.markdown("<br>", unsafe_allow_html=True)  # Espaço entre categorias
+                                st.markdown(f"<div style='font-size:16px; line-height:1.4'>• Erro no cálculo</div>", unsafe_allow_html=True)
         else:
-            st.write("**Distribuição por Categorias:**")
-            st.write("*Nenhum dado disponível com os filtros aplicados*")
+            st.markdown("<div style='font-size:18px; font-weight:bold; margin-bottom:8px; color:#1c83e1'>Distribuição por Categorias:</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:16px; line-height:1.4; font-style:italic'>Nenhum dado disponível com os filtros aplicados</div>", unsafe_allow_html=True)
 
 def encontrar_coluna(df, nomes_possiveis):
     """Encontra uma coluna no dataframe baseado em nomes possíveis (case-insensitive)"""
@@ -477,27 +607,45 @@ def calcular_area_parcelas_tradicional(df_inv_filtered):
         return 0.0, "Parcelas (erro)"
 
 def calcular_densidade_regenerantes(df_inv, df_carac):
-    """Calcula a densidade de indivíduos regenerantes com método adaptativo"""
+    """Calcula a densidade de indivíduos regenerantes seguindo critérios específicos"""
     try:
         # Verificar se há dados
         if len(df_inv) == 0 or len(df_carac) == 0:
             return 0.0
             
-        # Encontrar colunas necessárias
-        plaqueta_col = encontrar_coluna(df_inv, ['plaqueta', 'plaq', 'id'])
-        idade_col = encontrar_coluna(df_inv, ['idade', 'age', 'class_idade'])
-        ht_col = encontrar_coluna(df_inv, ['ht', 'altura', 'height', 'h'])
+        # Aplicar filtros específicos
+        df_filtrado = df_inv.copy()
         
-        if not all([plaqueta_col, idade_col, ht_col]):
+        # 1. Remover "Morto/Morta"
+        especies_col = encontrar_coluna(df_filtrado, ['especies', 'especie', 'species', 'sp'])
+        if especies_col:
+            df_filtrado = df_filtrado[~df_filtrado[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+        
+        # 2. Filtrar apenas origem "Nativa"
+        origem_col = encontrar_coluna(df_filtrado, ['origem', 'origin', 'procedencia'])
+        if origem_col:
+            df_filtrado = df_filtrado[df_filtrado[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+        
+        # 3. Filtrar idade "Jovem"
+        idade_col = encontrar_coluna(df_filtrado, ['idade', 'age', 'class_idade'])
+        if idade_col:
+            df_filtrado = df_filtrado[df_filtrado[idade_col].astype(str).str.contains('Jovem', case=False, na=False)]
+        
+        # 4. Filtrar altura > 0.5
+        ht_col = encontrar_coluna(df_filtrado, ['ht', 'altura', 'height', 'h'])
+        if ht_col:
+            alturas = pd.to_numeric(df_filtrado[ht_col], errors='coerce')
+            df_filtrado = df_filtrado[alturas > 0.5]
+        
+        if len(df_filtrado) == 0:
             return 0.0
         
-        # Filtrar indivíduos jovens com altura > 0.5
-        regenerantes = df_inv[
-            (df_inv[idade_col].astype(str).str.lower().str.contains('jovem', na=False)) & 
-            (pd.to_numeric(df_inv[ht_col], errors='coerce') > 0.5)
-        ]
-        
-        num_regenerantes = regenerantes[plaqueta_col].nunique()
+        # Contar indivíduos regenerantes válidos
+        plaqueta_col = encontrar_coluna(df_filtrado, ['plaqueta', 'plaq', 'id'])
+        if plaqueta_col:
+            num_regenerantes = df_filtrado[plaqueta_col].nunique()
+        else:
+            num_regenerantes = len(df_filtrado)
         
         # Calcular área amostrada usando método adaptativo
         area_ha, metodo = calcular_area_amostrada(df_carac, df_inv)
@@ -548,6 +696,44 @@ def calcular_densidade_geral(df_inv, df_carac):
 # Remover função main() daqui - será movida para o final
 
 def pagina_dashboard_principal(df_caracterizacao, df_inventario):
+    # CSS customizado para melhor ajuste de texto
+    st.markdown("""
+    <style>
+    .small-text {
+        font-size: 11px !important;
+        line-height: 1.2 !important;
+    }
+    .extra-small-text {
+        font-size: 10px !important;
+        line-height: 1.1 !important;
+    }
+    .metric-container {
+        padding: 0.1rem !important;
+    }
+    /* Reduzir padding das métricas */
+    [data-testid="metric-container"] {
+        padding: 0.2rem !important;
+    }
+    /* Reduzir tamanho da fonte dos VALORES das métricas */
+    [data-testid="metric-container"] > div > div > div {
+        font-size: 16px !important;
+    }
+    /* Reduzir tamanho da fonte dos valores principais das métricas */
+    [data-testid="metric-container"] [data-testid="metric-value"] {
+        font-size: 14px !important;
+        line-height: 1.1 !important;
+    }
+    /* Reduzir altura das linhas nos textos pequenos */
+    small {
+        line-height: 1.1 !important;
+    }
+    /* Ajustar o título da métrica também */
+    [data-testid="metric-container"] [data-testid="metric-label"] {
+        font-size: 12px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.markdown("---")
     
     # Informação sobre limpeza de dados
@@ -658,6 +844,11 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                 # Comparação case-insensitive e tratamento de espaços
                 mask = df_carac_filtered[filtro].astype(str).str.strip().str.lower() == valor.strip().lower()
                 df_carac_filtered = df_carac_filtered[mask]
+            
+            # Aplicar também ao BD_inventario se a coluna existir
+            if filtro in df_inv_filtered.columns:
+                mask = df_inv_filtered[filtro].astype(str).str.strip().str.lower() == valor.strip().lower()
+                df_inv_filtered = df_inv_filtered[mask]
     
     # Sempre aplicar a conexão via cod_parc se ambas as colunas existem
     if cod_parc_carac and cod_parc_inv and len(df_carac_filtered) > 0:
@@ -780,7 +971,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
         if len(df_inv_filtered) > 0 and len(df_carac_filtered) > 0:
             densidade, metodo = calcular_densidade_geral(df_inv_filtered, df_carac_filtered)
             with col_str4:
-                st.metric("🌱 Densidade", f"{densidade:.0f} ind/ha")
+                st.metric("🌱 Densidade", formatar_densidade_br(densidade))
         
         # Gráficos de estrutura florestal
         col_graf1, col_graf2 = st.columns(2)
@@ -920,7 +1111,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                 if pd.notna(copa_media):
                     # Definir cor baseada na qualidade
                     cor = "normal" if copa_media >= 50 else "inverse"
-                    st.metric("🌳 Cobertura Copa", f"{copa_media:.1f}%", delta_color=cor)
+                    st.metric("🌳 Cobertura Copa", formatar_porcentagem_br(copa_media, 1), delta_color=cor)
         
         # Solo exposto (quanto menor, melhor)
         solo_col = encontrar_coluna(df_carac_filtered, ['solo_exposto', 'solo exposto'])
@@ -930,7 +1121,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                 if pd.notna(solo_medio):
                     # Inverso: menos solo exposto = melhor
                     cor = "inverse" if solo_medio > 20 else "normal"
-                    st.metric("🏜️ Solo Exposto", f"{solo_medio:.1f}%", delta_color=cor)
+                    st.metric("🏜️ Solo Exposto", formatar_porcentagem_br(solo_medio, 1), delta_color=cor)
         
         # Serapilheira
         sera_col = encontrar_coluna(df_carac_filtered, ['serapilheira'])
@@ -939,7 +1130,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                 sera_media = pd.to_numeric(df_carac_filtered[sera_col], errors='coerce').mean()
                 if pd.notna(sera_media):
                     cor = "normal" if sera_media >= 30 else "inverse"
-                    st.metric("🍂 Serapilheira", f"{sera_media:.1f}%", delta_color=cor)
+                    st.metric("🍂 Serapilheira", formatar_porcentagem_br(sera_media, 1), delta_color=cor)
         
         # Gramíneas (invasoras)
         gram_col = encontrar_coluna(df_carac_filtered, ['graminea'])
@@ -948,7 +1139,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                 gram_media = pd.to_numeric(df_carac_filtered[gram_col], errors='coerce').mean()
                 if pd.notna(gram_media):
                     cor = "inverse" if gram_media > 30 else "normal"
-                    st.metric("🌾 Gramíneas", f"{gram_media:.1f}%", delta_color=cor)
+                    st.metric("🌾 Gramíneas", formatar_porcentagem_br(gram_media, 1), delta_color=cor)
         
         # Gráfico comparativo de indicadores ambientais
         st.write("**Perfil de Qualidade Ambiental**")
@@ -1124,7 +1315,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
             
             with col_score2:
                 densidade_atual, _ = calcular_densidade_geral(df_inv_filtered, df_carac_filtered) if len(df_inv_filtered) > 0 and len(df_carac_filtered) > 0 else (0, "")
-                st.metric("🌱 Status Atual", f"{densidade_atual:.0f} ind/ha")
+                st.metric("🌱 Status Atual", formatar_densidade_br(densidade_atual))
             
             with col_score3:
                 if especies_col and len(df_inv_filtered) > 0:
@@ -1577,21 +1768,24 @@ def auditoria_dendrometricos(df_inventario):
     with col2:
         if col_ht:
             ht_validos = df_inventario[col_ht].notna().sum()
-            st.metric("Com Altura Válida", f"{ht_validos} ({ht_validos/total_individuos*100:.1f}%)")
+            perc_ht = ht_validos/total_individuos*100
+            st.metric("Com Altura Válida", f"{formatar_numero_br(ht_validos, 0)} ({formatar_porcentagem_br(perc_ht, 1)})")
         else:
             st.metric("Com Altura Válida", "N/A")
     
     with col3:
         if col_dap:
             dap_validos = df_inventario[col_dap].notna().sum()
-            st.metric("Com DAP Válido", f"{dap_validos} ({dap_validos/total_individuos*100:.1f}%)")
+            perc_dap = dap_validos/total_individuos*100
+            st.metric("Com DAP Válido", f"{formatar_numero_br(dap_validos, 0)} ({formatar_porcentagem_br(perc_dap, 1)})")
         else:
             st.metric("Com DAP Válido", "N/A")
     
     with col4:
         if col_ht and col_dap:
             ambos_validos = df_inventario[[col_ht, col_dap]].notna().all(axis=1).sum()
-            st.metric("Com Ambos Válidos", f"{ambos_validos} ({ambos_validos/total_individuos*100:.1f}%)")
+            perc_ambos = ambos_validos/total_individuos*100
+            st.metric("Com Ambos Válidos", f"{formatar_numero_br(ambos_validos, 0)} ({formatar_porcentagem_br(perc_ambos, 1)})")
         else:
             st.metric("Com Ambos Válidos", "N/A")
     
@@ -1901,35 +2095,31 @@ def pagina_analises_avancadas(df_caracterizacao, df_inventario):
         if propriedades_selecionadas:
             df_carac_filtrado = df_caracterizacao[df_caracterizacao['cod_prop'].isin(propriedades_selecionadas)]
             
-            # Filtrar inventário baseado nas propriedades selecionadas
-            cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
-            if cod_parc_col:
-                # Se existe coluna cod_parc na caracterização, usar ela para filtrar
-                if 'cod_parc' in df_carac_filtrado.columns:
-                    parcelas_validas = df_carac_filtrado['cod_parc'].dropna().unique()
-                    df_inv_filtrado = df_inventario[df_inventario[cod_parc_col].astype(str).isin([str(p) for p in parcelas_validas])]
-                else:
-                    # Se não tem cod_parc na caracterização, tentar filtrar por propriedade diretamente no inventário
-                    # Extrair propriedade do cod_parc do inventário (formato PROP_UT)
-                    df_inv_temp = df_inventario.copy()
-                    df_inv_temp['prop_extraida'] = df_inv_temp[cod_parc_col].astype(str).str.split('_').str[0]
-                    df_inv_filtrado = df_inv_temp[df_inv_temp['prop_extraida'].isin([str(p) for p in propriedades_selecionadas])]
-                    if 'prop_extraida' in df_inv_filtrado.columns:
-                        df_inv_filtrado = df_inv_filtrado.drop('prop_extraida', axis=1)
+            # Filtrar inventário DIRETAMENTE por cod_prop se a coluna existir
+            if 'cod_prop' in df_inventario.columns:
+                df_inv_filtrado = df_inventario[df_inventario['cod_prop'].isin(propriedades_selecionadas)]
             else:
-                # Se não encontrou cod_parc, usar todos os dados do inventário
-                df_inv_filtrado = df_inventario
+                # Fallback: filtrar baseado nas propriedades selecionadas via cod_parc
+                cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+                if cod_parc_col:
+                    # Se existe coluna cod_parc na caracterização, usar ela para filtrar
+                    if 'cod_parc' in df_carac_filtrado.columns:
+                        parcelas_validas = df_carac_filtrado['cod_parc'].dropna().unique()
+                        df_inv_filtrado = df_inventario[df_inventario[cod_parc_col].astype(str).isin([str(p) for p in parcelas_validas])]
+                    else:
+                        # Se não tem cod_parc na caracterização, tentar filtrar por propriedade diretamente no inventário
+                        # Extrair propriedade do cod_parc do inventário (formato PROP_UT)
+                        df_inv_temp = df_inventario.copy()
+                        df_inv_temp['prop_extraida'] = df_inv_temp[cod_parc_col].astype(str).str.split('_').str[0]
+                        df_inv_filtrado = df_inv_temp[df_inv_temp['prop_extraida'].isin([str(p) for p in propriedades_selecionadas])]
+                        if 'prop_extraida' in df_inv_filtrado.columns:
+                            df_inv_filtrado = df_inv_filtrado.drop('prop_extraida', axis=1)
+                else:
+                    # Se não encontrou cod_parc, usar todos os dados do inventário
+                    df_inv_filtrado = df_inventario
         else:
             df_carac_filtrado = df_caracterizacao
             df_inv_filtrado = df_inventario
-        
-        # Debug: mostrar informações de filtragem
-        st.sidebar.markdown("**🔍 Debug - Dados Filtrados:**")
-        st.sidebar.write(f"Caracterização: {len(df_carac_filtrado)} registros")
-        st.sidebar.write(f"Inventário: {len(df_inv_filtrado)} registros")
-        
-        if len(propriedades_selecionadas) > 0:
-            st.sidebar.write(f"Propriedades: {', '.join(map(str, propriedades_selecionadas))}")
     
     # Abas principais
     tab1, tab2, tab3 = st.tabs([
@@ -2175,17 +2365,26 @@ def calcular_fitossociologia_censo(df_inventario, df_caracterizacao):
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total de Espécies", len(fitossocio_display))
+            st.metric("Total de Espécies", formatar_numero_br(len(fitossocio_display), 0))
         with col2:
-            st.metric("Total de Indivíduos", total_individuos)
+            st.metric("Total de Indivíduos", formatar_numero_br(total_individuos, 0))
         with col3:
             if area_basal_disponivel:
-                st.metric("Área Basal Total", f"{total_area_basal:.3f} m²")
+                st.metric("Área Basal Total", f"{formatar_numero_br(total_area_basal, 3)} m²")
             else:
                 st.metric("Área Basal", "Não calculada")
         
+        # Aplicar formatação brasileira na tabela
+        colunas_porcentagem = ['DR (%)', 'DoR (%)', 'FR (%)', 'VC (%)', 'VI (%)']
+        colunas_numericas = ['Densidade (ind/ha)', 'Dominância (m²/ha)', 'AB_media (m²)']
+        fitossocio_display_formatado = formatar_dataframe_br(
+            fitossocio_display, 
+            colunas_numericas=colunas_numericas, 
+            colunas_porcentagem=colunas_porcentagem
+        )
+        
         # Tabela principal
-        st.dataframe(fitossocio_display, use_container_width=True, height=400)
+        st.dataframe(fitossocio_display_formatado, use_container_width=True, height=400)
         
         # Download
         csv = fitossocio_display.to_csv(index=False)
@@ -2330,19 +2529,28 @@ def calcular_fitossociologia_parcelas(df_inventario, df_caracterizacao):
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total de Espécies", len(fitossocio_display))
+            st.metric("Total de Espécies", formatar_numero_br(len(fitossocio_display), 0))
         with col2:
-            st.metric("Total de Indivíduos", total_individuos)
+            st.metric("Total de Indivíduos", formatar_numero_br(total_individuos, 0))
         with col3:
-            st.metric("Total de Parcelas", total_parcelas)
+            st.metric("Total de Parcelas", formatar_numero_br(total_parcelas, 0))
         with col4:
             if area_basal_disponivel:
-                st.metric("Área Basal Total", f"{total_area_basal:.3f} m²")
+                st.metric("Área Basal Total", f"{formatar_numero_br(total_area_basal, 3)} m²")
             else:
                 st.metric("Área Basal", "Não calculada")
         
+        # Aplicar formatação brasileira na tabela
+        colunas_porcentagem = ['DR (%)', 'DoR (%)', 'FR (%)', 'VC (%)', 'VI (%)']
+        colunas_numericas = ['Densidade (ind/ha)', 'Dominância (m²/ha)', 'Área Basal (m²)']
+        fitossocio_display_formatado = formatar_dataframe_br(
+            fitossocio_display, 
+            colunas_numericas=colunas_numericas, 
+            colunas_porcentagem=colunas_porcentagem
+        )
+        
         # Tabela principal
-        st.dataframe(fitossocio_display, use_container_width=True, height=400)
+        st.dataframe(fitossocio_display_formatado, use_container_width=True, height=400)
         
         # Download
         csv = fitossocio_display.to_csv(index=False)
@@ -2524,12 +2732,7 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
     # === RESUMO GERAL ===
     st.subheader("📊 Resumo Geral dos Indicadores")
     
-    # Debug: verificar colunas disponíveis
-    st.write("Colunas disponíveis:", list(dados_restauracao.columns))
-    st.write("Primeiras 3 linhas:")
-    st.dataframe(dados_restauracao.head(3))
-    
-    # Métricas gerais
+    # Métricas geraisd
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -2618,20 +2821,29 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         df_carac_prop = df_caracterizacao[df_caracterizacao['cod_prop'] == cod_prop] if 'cod_prop' in df_caracterizacao.columns else pd.DataFrame()
         
         # Filtrar dados da propriedade no inventário
-        cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
-        if cod_parc_col:
-            df_inv_prop = df_inventario[df_inventario[cod_parc_col].astype(str).str.startswith(f"{cod_prop}_")]
+        # Usar a coluna cod_prop diretamente se existir
+        if 'cod_prop' in df_inventario.columns:
+            df_inv_prop = df_inventario[df_inventario['cod_prop'] == cod_prop]
         else:
-            df_inv_prop = pd.DataFrame()
+            # Fallback para método anterior
+            cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+            if cod_parc_col:
+                df_inv_prop = df_inventario[df_inventario[cod_parc_col].astype(str).str.startswith(f"{cod_prop}_")]
+                if len(df_inv_prop) == 0:
+                    df_inv_prop = df_inventario[df_inventario[cod_parc_col].astype(str).str.contains(f"{cod_prop}", na=False)]
+                if len(df_inv_prop) == 0:
+                    df_inv_prop = df_inventario[df_inventario[cod_parc_col].astype(str) == str(cod_prop)]
+            else:
+                df_inv_prop = pd.DataFrame()
         
         # === 1. COBERTURA DE COPA ===
         cobertura_col = encontrar_coluna(df_carac_prop, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
         if cobertura_col and len(df_carac_prop) > 0:
             cobertura_media = pd.to_numeric(df_carac_prop[cobertura_col], errors='coerce').mean()
             # Converter de 0-1 para 0-100% se necessário
-            if cobertura_media <= 1:
+            if not pd.isna(cobertura_media) and cobertura_media <= 1:
                 cobertura_media = cobertura_media * 100
-            resultado['cobertura_copa'] = cobertura_media
+            resultado['cobertura_copa'] = cobertura_media if not pd.isna(cobertura_media) else 0
         else:
             resultado['cobertura_copa'] = 0
         
@@ -2659,21 +2871,40 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         # === 3. RIQUEZA DE ESPÉCIES ===
         especies_col = encontrar_coluna(df_inv_prop, ['especies', 'especie', 'species', 'sp'])
         if especies_col and len(df_inv_prop) > 0:
-            riqueza_observada = df_inv_prop[especies_col].nunique()
+            # Filtrar espécies válidas (remover "Morto/Morta")
+            df_especies_validas = df_inv_prop[~df_inv_prop[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+            
+            # Riqueza total (todas as espécies exceto "Morto")
+            riqueza_observada = df_especies_validas[especies_col].nunique()
+            
+            # Riqueza de espécies nativas
+            origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
+            if origem_col:
+                df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+                riqueza_nativas = df_nativas[especies_col].nunique()
+            else:
+                riqueza_nativas = 0
         else:
             riqueza_observada = 0
+            riqueza_nativas = 0
         
         resultado['riqueza_observada'] = riqueza_observada
+        resultado['riqueza_nativas'] = riqueza_nativas
         
-        # Obter meta de riqueza do BD_inventario
+        # Obter meta de riqueza (baseada em espécies nativas)
         meta_riqueza_col = encontrar_coluna(df_inv_prop, ['meta_riqueza', 'riqueza_meta', 'meta_especies'])
         if meta_riqueza_col and len(df_inv_prop) > 0:
-            meta_riqueza = pd.to_numeric(df_inv_prop[meta_riqueza_col], errors='coerce').iloc[0]
+            meta_riqueza = pd.to_numeric(df_inv_prop[meta_riqueza_col], errors='coerce').dropna()
+            if len(meta_riqueza) > 0:
+                meta_riqueza = meta_riqueza.iloc[0]
+            else:
+                meta_riqueza = 30  # Valor padrão
         else:
             meta_riqueza = 30  # Valor padrão
         
         resultado['meta_riqueza'] = meta_riqueza
-        resultado['riqueza_adequada'] = riqueza_observada >= meta_riqueza
+        # Meta baseada em espécies nativas
+        resultado['riqueza_adequada'] = riqueza_nativas >= meta_riqueza
         
         # === 4. STATUS GERAL ===
         status_count = sum([
@@ -2698,28 +2929,53 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         return None
 
 def calcular_densidade_regenerantes_propriedade(df_inventario, df_caracterizacao):
-    """Calcula densidade de regenerantes para uma propriedade"""
+    """Calcula densidade de regenerantes para uma propriedade seguindo critérios específicos"""
     try:
         if len(df_inventario) == 0:
             return 0
         
-        # Contar indivíduos regenerantes (assumindo que todos no BD são regenerantes)
-        plaqueta_col = encontrar_coluna(df_inventario, ['plaqueta', 'plaq', 'id'])
+        # Aplicar filtros específicos
+        df_filtrado = df_inventario.copy()
+        
+        # 1. Remover "Morto/Morta"
+        especies_col = encontrar_coluna(df_filtrado, ['especies', 'especie', 'species', 'sp'])
+        if especies_col:
+            df_filtrado = df_filtrado[~df_filtrado[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+        
+        # 2. Filtrar apenas origem "Nativa"
+        origem_col = encontrar_coluna(df_filtrado, ['origem', 'origin', 'procedencia'])
+        if origem_col:
+            df_filtrado = df_filtrado[df_filtrado[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+        
+        # 3. Filtrar idade "Jovem"
+        idade_col = encontrar_coluna(df_filtrado, ['idade', 'age', 'classe_idade'])
+        if idade_col:
+            df_filtrado = df_filtrado[df_filtrado[idade_col].astype(str).str.contains('Jovem', case=False, na=False)]
+        
+        # 4. Filtrar altura > 0.5
+        ht_col = encontrar_coluna(df_filtrado, ['ht', 'altura', 'height'])
+        if ht_col:
+            alturas = pd.to_numeric(df_filtrado[ht_col], errors='coerce')
+            df_filtrado = df_filtrado[alturas > 0.5]
+        
+        if len(df_filtrado) == 0:
+            return 0
+        
+        # Contar indivíduos regenerantes
+        plaqueta_col = encontrar_coluna(df_filtrado, ['plaqueta', 'plaq', 'id'])
         if plaqueta_col:
-            num_individuos = df_inventario[plaqueta_col].nunique()
+            num_individuos = df_filtrado[plaqueta_col].nunique()
         else:
-            num_individuos = len(df_inventario)
+            num_individuos = len(df_filtrado)
         
-        # Calcular área
-        area_col = encontrar_coluna(df_inventario, ['area_ha', 'area'])
-        if area_col and len(df_inventario) > 0:
-            area_ha = pd.to_numeric(df_inventario[area_col], errors='coerce').iloc[0]
-            if pd.isna(area_ha) or area_ha <= 0:
-                area_ha = 1  # Padrão
+        # Calcular área usando o mesmo método da função principal
+        area_ha, metodo = calcular_area_amostrada(df_caracterizacao, df_filtrado)
+        
+        if area_ha > 0:
+            densidade = num_individuos / area_ha
         else:
-            area_ha = 1
-        
-        densidade = num_individuos / area_ha
+            densidade = 0
+            
         return densidade
     
     except Exception:
@@ -2865,13 +3121,31 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
     # Tabela resumo
     st.markdown("#### 📊 Resumo por Propriedade")
     
-    df_resumo_riqueza = dados_restauracao[['cod_prop', 'riqueza_observada', 'meta_riqueza', 'riqueza_adequada']].copy()
+    # Verificar se existe coluna de riqueza nativas
+    colunas_resumo = ['cod_prop', 'riqueza_observada', 'meta_riqueza', 'riqueza_adequada']
+    if 'riqueza_nativas' in dados_restauracao.columns:
+        colunas_resumo.insert(2, 'riqueza_nativas')
+    
+    df_resumo_riqueza = dados_restauracao[colunas_resumo].copy()
     df_resumo_riqueza['Status'] = df_resumo_riqueza['riqueza_adequada'].apply(
         lambda x: '✅ Adequada' if x else '⚠️ Abaixo da Meta'
     )
     df_resumo_riqueza = df_resumo_riqueza.drop('riqueza_adequada', axis=1)
     
+    # Renomear colunas para melhor visualização
+    nomes_colunas = {
+        'cod_prop': 'Propriedade',
+        'riqueza_observada': 'Riqueza Total',
+        'riqueza_nativas': 'Riqueza Nativas',
+        'meta_riqueza': 'Meta (Nativas)',
+        'Status': 'Status'
+    }
+    df_resumo_riqueza = df_resumo_riqueza.rename(columns=nomes_colunas)
+    
     st.dataframe(df_resumo_riqueza, use_container_width=True)
+    
+    # Informação sobre os critérios
+    st.info("💡 **Critérios:** Meta baseada em espécies nativas. Espécies 'Morto/Morta' excluídas de todas as análises.")
 
 def exibir_analise_por_uts(df_caracterizacao, df_inventario):
     """Exibe análise detalhada por UTs dentro das propriedades"""
