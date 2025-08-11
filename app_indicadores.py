@@ -699,7 +699,38 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
     st.markdown("---")
     
     # ============================================
-    # 🌳 DASHBOARD DE MONITORAMENTO DE REFLORESTAMENTO
+    # � INDICADORES DE RESTAURAÇÃO FLORESTAL 
+    # ============================================
+    
+    st.header("🎯 Indicadores de Restauração Florestal")
+    st.markdown("*Monitoramento das metas de reparação do desastre ambiental*")
+    
+    # Informações sobre as metas
+    with st.expander("ℹ️ Sobre as Metas de Restauração"):
+        st.markdown("""
+        ### 🎯 Metas de Reparação do Desastre Ambiental
+        
+        **🌿 Cobertura de Copa:**
+        - **Meta**: > 80% em todas as propriedades
+        - **Indicador**: Cobertura arbórea nativa
+        
+        **🌱 Densidade de Regenerantes:**
+        - **Restauração Ativa**: > 1.333 indivíduos/ha
+        - **Restauração Assistida**: > 1.500 indivíduos/ha
+        - **Critério**: Indivíduos regenerantes (jovens)
+        
+        **🌳 Riqueza de Espécies Arbóreas:**
+        - **Metas variáveis**: 10, 30, 57 ou 87 espécies por cenário
+        - **Definidas**: Por propriedade conforme contexto ecológico
+        """)
+    
+    # Chamar função para exibir indicadores de restauração
+    exibir_indicadores_restauracao(df_carac_filtered, df_inv_filtered)
+    
+    st.markdown("---")
+    
+    # ============================================
+    # �🌳 DASHBOARD DE MONITORAMENTO DE REFLORESTAMENTO
     # ============================================
     
     st.header("🌱 Monitoramento de Reflorestamento")
@@ -1924,6 +1955,11 @@ def pagina_analises_avancadas(df_caracterizacao, df_inventario):
             - **Frequência Relativa (FR)**: (Fi/Ftotal) × 100
             - **Valor de Importância (VI)**: (DR + DoR + FR) / 3
             
+            **🌳 Tratamento de Múltiplos Fustes:**
+            - **Indivíduos**: Contados por plaqueta única (mesmo com múltiplos fustes)
+            - **Área Basal**: Soma de todos os fustes do mesmo indivíduo (plaqueta)
+            - **Exemplo**: Plaqueta 123 com 3 fustes = 1 indivíduo, AB = AB_fuste1 + AB_fuste2 + AB_fuste3
+            
             Onde: Ni = número de indivíduos da espécie i, N = total de indivíduos, 
             ABi = área basal da espécie i, Fi = frequência da espécie i
             """)
@@ -2064,14 +2100,28 @@ def calcular_fitossociologia_censo(df_inventario, df_caracterizacao):
         
         # Agrupar por espécie
         if col_plaqueta:
-            # Usar plaquetas para contar indivíduos únicos
-            fitossocio = df_trabalho.groupby(col_especie).agg({
-                col_plaqueta: 'nunique',  # Número de indivíduos únicos
-                'area_basal_m2': 'sum' if area_basal_disponivel else 'count'
-            }).reset_index()
-            fitossocio.columns = [col_especie, 'num_individuos', 'area_basal_total']
+            # CORREÇÃO: Primeiro agrupar por plaqueta (indivíduo) para somar fustes múltiplos
+            if area_basal_disponivel:
+                # Somar área basal por indivíduo (todos os fustes de uma mesma plaqueta)
+                df_por_individuo = df_trabalho.groupby([col_especie, col_plaqueta]).agg({
+                    'area_basal_m2': 'sum'  # Soma fustes do mesmo indivíduo
+                }).reset_index()
+                
+                # Agora agrupar por espécie
+                fitossocio = df_por_individuo.groupby(col_especie).agg({
+                    col_plaqueta: 'nunique',     # Número de indivíduos únicos
+                    'area_basal_m2': 'sum'       # Soma das áreas basais dos indivíduos
+                }).reset_index()
+                fitossocio.columns = [col_especie, 'num_individuos', 'area_basal_total']
+            else:
+                # Sem área basal, apenas contar indivíduos
+                fitossocio = df_trabalho.groupby(col_especie).agg({
+                    col_plaqueta: 'nunique'  # Número de indivíduos únicos
+                }).reset_index()
+                fitossocio['area_basal_total'] = 0
+                fitossocio.columns = [col_especie, 'num_individuos', 'area_basal_total']
         else:
-            # Fallback: contar registros
+            # Fallback: contar registros (sem plaqueta não há como distinguir fustes)
             fitossocio = df_trabalho.groupby(col_especie).agg({
                 col_especie: 'count',
                 'area_basal_m2': 'sum' if area_basal_disponivel else 'count'
@@ -2206,10 +2256,21 @@ def calcular_fitossociologia_parcelas(df_inventario, df_caracterizacao):
             individuos_especies = df_trabalho.groupby(col_especie).size().reset_index()
         individuos_especies.columns = [col_especie, 'num_individuos']
         
-        # Calcular área basal por espécie
+        # Calcular área basal por espécie (CORREÇÃO: considerar fustes múltiplos)
         if area_basal_disponivel:
-            area_basal_especies = df_trabalho.groupby(col_especie)['area_basal_m2'].sum().reset_index()
-            area_basal_especies.columns = [col_especie, 'area_basal_total']
+            if col_plaqueta:
+                # Primeiro agrupar por plaqueta para somar fustes múltiplos do mesmo indivíduo
+                df_por_individuo = df_trabalho.groupby([col_especie, col_plaqueta]).agg({
+                    'area_basal_m2': 'sum'  # Soma fustes do mesmo indivíduo
+                }).reset_index()
+                
+                # Depois agrupar por espécie
+                area_basal_especies = df_por_individuo.groupby(col_especie)['area_basal_m2'].sum().reset_index()
+                area_basal_especies.columns = [col_especie, 'area_basal_total']
+            else:
+                # Sem plaqueta, somar diretamente (não há como distinguir fustes)
+                area_basal_especies = df_trabalho.groupby(col_especie)['area_basal_m2'].sum().reset_index()
+                area_basal_especies.columns = [col_especie, 'area_basal_total']
         else:
             area_basal_especies = individuos_especies.copy()
             area_basal_especies['area_basal_total'] = 0
@@ -2437,6 +2498,417 @@ def gerar_visualizacoes_avancadas(df_inventario, df_caracterizacao):
         """)
     
     st.warning("Volte em breve para acessar essas funcionalidades!")
+
+# ============================================================================
+# INDICADORES DE RESTAURAÇÃO FLORESTAL
+# ============================================================================
+
+def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
+    """Exibe dashboard específico para indicadores de restauração florestal"""
+    
+    # Verificar se há dados
+    if len(df_caracterizacao) == 0 and len(df_inventario) == 0:
+        st.warning("⚠️ Nenhum dado disponível para análise dos indicadores de restauração.")
+        return
+    
+    # Obter dados por propriedade
+    dados_restauracao = calcular_indicadores_restauracao(df_caracterizacao, df_inventario)
+    
+    if dados_restauracao.empty:
+        st.warning("⚠️ Não foi possível calcular os indicadores de restauração.")
+        return
+    
+    # === RESUMO GERAL ===
+    st.subheader("📊 Resumo Geral dos Indicadores")
+    
+    # Métricas gerais
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_props = len(dados_restauracao)
+        st.metric("Total de Propriedades", total_props)
+    
+    with col2:
+        props_cobertura_ok = len(dados_restauracao[dados_restauracao['cobertura_copa'] >= 80])
+        st.metric("Cobertura Copa ≥80%", f"{props_cobertura_ok}/{total_props}")
+    
+    with col3:
+        props_densidade_ok = len(dados_restauracao[dados_restauracao['densidade_adequada'] == True])
+        st.metric("Densidade Adequada", f"{props_densidade_ok}/{total_props}")
+    
+    with col4:
+        props_riqueza_ok = len(dados_restauracao[dados_restauracao['riqueza_adequada'] == True])
+        st.metric("Riqueza Adequada", f"{props_riqueza_ok}/{total_props}")
+    
+    # === ABAS DE ANÁLISE ===
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🌿 Cobertura de Copa",
+        "🌱 Densidade de Regenerantes", 
+        "🌳 Riqueza de Espécies",
+        "📊 Análise por UTs"
+    ])
+    
+    # ABA 1: COBERTURA DE COPA
+    with tab1:
+        exibir_analise_cobertura_copa(dados_restauracao, df_caracterizacao)
+    
+    # ABA 2: DENSIDADE DE REGENERANTES
+    with tab2:
+        exibir_analise_densidade_regenerantes(dados_restauracao, df_inventario)
+    
+    # ABA 3: RIQUEZA DE ESPÉCIES
+    with tab3:
+        exibir_analise_riqueza_especies(dados_restauracao, df_inventario)
+    
+    # ABA 4: ANÁLISE POR UTs
+    with tab4:
+        exibir_analise_por_uts(df_caracterizacao, df_inventario)
+
+def calcular_indicadores_restauracao(df_caracterizacao, df_inventario):
+    """Calcula os indicadores de restauração por propriedade"""
+    try:
+        resultados = []
+        
+        # Obter propriedades únicas
+        propriedades = set()
+        
+        if 'cod_prop' in df_caracterizacao.columns:
+            propriedades.update(df_caracterizacao['cod_prop'].dropna().unique())
+        
+        # Extrair propriedades do inventário se necessário
+        cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+        if cod_parc_col:
+            for parc in df_inventario[cod_parc_col].dropna().unique():
+                if '_' in str(parc):
+                    prop = str(parc).split('_')[0]
+                    propriedades.add(prop)
+        
+        # Calcular indicadores para cada propriedade
+        for prop in propriedades:
+            resultado = calcular_indicadores_propriedade(prop, df_caracterizacao, df_inventario)
+            if resultado:
+                resultados.append(resultado)
+        
+        return pd.DataFrame(resultados)
+    
+    except Exception as e:
+        st.error(f"Erro ao calcular indicadores de restauração: {e}")
+        return pd.DataFrame()
+
+def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario):
+    """Calcula indicadores de restauração para uma propriedade específica"""
+    try:
+        resultado = {'cod_prop': cod_prop}
+        
+        # Filtrar dados da propriedade na caracterização
+        df_carac_prop = df_caracterizacao[df_caracterizacao['cod_prop'] == cod_prop] if 'cod_prop' in df_caracterizacao.columns else pd.DataFrame()
+        
+        # Filtrar dados da propriedade no inventário
+        cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+        if cod_parc_col:
+            df_inv_prop = df_inventario[df_inventario[cod_parc_col].astype(str).str.startswith(f"{cod_prop}_")]
+        else:
+            df_inv_prop = pd.DataFrame()
+        
+        # === 1. COBERTURA DE COPA ===
+        cobertura_col = encontrar_coluna(df_carac_prop, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
+        if cobertura_col and len(df_carac_prop) > 0:
+            cobertura_media = pd.to_numeric(df_carac_prop[cobertura_col], errors='coerce').mean()
+            resultado['cobertura_copa'] = cobertura_media
+        else:
+            resultado['cobertura_copa'] = 0
+        
+        # === 2. DENSIDADE DE REGENERANTES ===
+        # Detectar método de restauração
+        metodo_col = encontrar_coluna(df_carac_prop, ['metodo_restauracao', 'metodo', 'tecnica_restauracao'])
+        metodo_restauracao = 'Ativa'  # Padrão
+        
+        if metodo_col and len(df_carac_prop) > 0:
+            metodo_valor = df_carac_prop[metodo_col].iloc[0]
+            if 'assistida' in str(metodo_valor).lower():
+                metodo_restauracao = 'Assistida'
+        
+        resultado['metodo_restauracao'] = metodo_restauracao
+        
+        # Calcular densidade
+        densidade = calcular_densidade_regenerantes_propriedade(df_inv_prop, df_carac_prop)
+        resultado['densidade_regenerantes'] = densidade
+        
+        # Meta de densidade
+        meta_densidade = 1500 if metodo_restauracao == 'Assistida' else 1333
+        resultado['meta_densidade'] = meta_densidade
+        resultado['densidade_adequada'] = densidade >= meta_densidade
+        
+        # === 3. RIQUEZA DE ESPÉCIES ===
+        especies_col = encontrar_coluna(df_inv_prop, ['especies', 'especie', 'species', 'sp'])
+        if especies_col and len(df_inv_prop) > 0:
+            riqueza_observada = df_inv_prop[especies_col].nunique()
+        else:
+            riqueza_observada = 0
+        
+        resultado['riqueza_observada'] = riqueza_observada
+        
+        # Obter meta de riqueza do BD_inventario
+        meta_riqueza_col = encontrar_coluna(df_inv_prop, ['meta_riqueza', 'riqueza_meta', 'meta_especies'])
+        if meta_riqueza_col and len(df_inv_prop) > 0:
+            meta_riqueza = pd.to_numeric(df_inv_prop[meta_riqueza_col], errors='coerce').iloc[0]
+        else:
+            meta_riqueza = 30  # Valor padrão
+        
+        resultado['meta_riqueza'] = meta_riqueza
+        resultado['riqueza_adequada'] = riqueza_observada >= meta_riqueza
+        
+        # === 4. STATUS GERAL ===
+        status_count = sum([
+            resultado['cobertura_copa'] >= 80,
+            resultado['densidade_adequada'],
+            resultado['riqueza_adequada']
+        ])
+        
+        if status_count == 3:
+            resultado['status_geral'] = 'Excelente'
+        elif status_count == 2:
+            resultado['status_geral'] = 'Bom'
+        elif status_count == 1:
+            resultado['status_geral'] = 'Regular'
+        else:
+            resultado['status_geral'] = 'Crítico'
+        
+        return resultado
+    
+    except Exception as e:
+        st.error(f"Erro ao calcular indicadores para propriedade {cod_prop}: {e}")
+        return None
+
+def calcular_densidade_regenerantes_propriedade(df_inventario, df_caracterizacao):
+    """Calcula densidade de regenerantes para uma propriedade"""
+    try:
+        if len(df_inventario) == 0:
+            return 0
+        
+        # Contar indivíduos regenerantes (assumindo que todos no BD são regenerantes)
+        plaqueta_col = encontrar_coluna(df_inventario, ['plaqueta', 'plaq', 'id'])
+        if plaqueta_col:
+            num_individuos = df_inventario[plaqueta_col].nunique()
+        else:
+            num_individuos = len(df_inventario)
+        
+        # Calcular área
+        area_col = encontrar_coluna(df_inventario, ['area_ha', 'area'])
+        if area_col and len(df_inventario) > 0:
+            area_ha = pd.to_numeric(df_inventario[area_col], errors='coerce').iloc[0]
+            if pd.isna(area_ha) or area_ha <= 0:
+                area_ha = 1  # Padrão
+        else:
+            area_ha = 1
+        
+        densidade = num_individuos / area_ha
+        return densidade
+    
+    except Exception:
+        return 0
+
+def exibir_analise_cobertura_copa(dados_restauracao, df_caracterizacao):
+    """Exibe análise específica da cobertura de copa"""
+    st.markdown("### 🌿 Análise de Cobertura de Copa")
+    
+    if len(dados_restauracao) == 0:
+        st.warning("Sem dados para análise de cobertura de copa")
+        return
+    
+    # Gráfico de barras - cobertura por propriedade
+    fig_cobertura = px.bar(
+        dados_restauracao.sort_values('cobertura_copa', ascending=False),
+        x='cod_prop',
+        y='cobertura_copa',
+        title='Cobertura de Copa por Propriedade',
+        labels={'cobertura_copa': 'Cobertura de Copa (%)', 'cod_prop': 'Propriedade'},
+        color='cobertura_copa',
+        color_continuous_scale='Greens'
+    )
+    
+    # Adicionar linha de meta (80%)
+    fig_cobertura.add_hline(y=80, line_dash="dash", line_color="red", 
+                           annotation_text="Meta: 80%")
+    
+    fig_cobertura.update_layout(height=400)
+    st.plotly_chart(fig_cobertura, use_container_width=True)
+    
+    # Tabela resumo
+    st.markdown("#### 📊 Resumo por Propriedade")
+    
+    df_resumo_cobertura = dados_restauracao[['cod_prop', 'cobertura_copa']].copy()
+    df_resumo_cobertura['Status'] = df_resumo_cobertura['cobertura_copa'].apply(
+        lambda x: '✅ Adequada' if x >= 80 else '⚠️ Abaixo da Meta'
+    )
+    df_resumo_cobertura['cobertura_copa'] = df_resumo_cobertura['cobertura_copa'].round(1)
+    
+    st.dataframe(df_resumo_cobertura, use_container_width=True)
+
+def exibir_analise_densidade_regenerantes(dados_restauracao, df_inventario):
+    """Exibe análise específica da densidade de regenerantes"""
+    st.markdown("### 🌱 Análise de Densidade de Regenerantes")
+    
+    if len(dados_restauracao) == 0:
+        st.warning("Sem dados para análise de densidade")
+        return
+    
+    # Gráfico comparativo com metas diferentes por método
+    fig_densidade = px.bar(
+        dados_restauracao.sort_values('densidade_regenerantes', ascending=False),
+        x='cod_prop',
+        y='densidade_regenerantes',
+        color='metodo_restauracao',
+        title='Densidade de Regenerantes por Propriedade e Método',
+        labels={'densidade_regenerantes': 'Densidade (ind/ha)', 'cod_prop': 'Propriedade'},
+        color_discrete_map={'Ativa': '#2E8B57', 'Assistida': '#228B22'}
+    )
+    
+    # Adicionar linhas de meta
+    fig_densidade.add_hline(y=1333, line_dash="dash", line_color="orange", 
+                           annotation_text="Meta Ativa: 1.333 ind/ha")
+    fig_densidade.add_hline(y=1500, line_dash="dash", line_color="red", 
+                           annotation_text="Meta Assistida: 1.500 ind/ha")
+    
+    fig_densidade.update_layout(height=400)
+    st.plotly_chart(fig_densidade, use_container_width=True)
+    
+    # Tabela resumo
+    st.markdown("#### 📊 Resumo por Propriedade")
+    
+    df_resumo_densidade = dados_restauracao[['cod_prop', 'metodo_restauracao', 'densidade_regenerantes', 'meta_densidade', 'densidade_adequada']].copy()
+    df_resumo_densidade['Status'] = df_resumo_densidade['densidade_adequada'].apply(
+        lambda x: '✅ Adequada' if x else '⚠️ Abaixo da Meta'
+    )
+    df_resumo_densidade['densidade_regenerantes'] = df_resumo_densidade['densidade_regenerantes'].round(0)
+    df_resumo_densidade = df_resumo_densidade.drop('densidade_adequada', axis=1)
+    
+    st.dataframe(df_resumo_densidade, use_container_width=True)
+
+def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
+    """Exibe análise específica da riqueza de espécies"""
+    st.markdown("### 🌳 Análise de Riqueza de Espécies")
+    
+    if len(dados_restauracao) == 0:
+        st.warning("Sem dados para análise de riqueza")
+        return
+    
+    # Gráfico de barras agrupadas - observado vs meta
+    df_riqueza_plot = dados_restauracao[['cod_prop', 'riqueza_observada', 'meta_riqueza']].melt(
+        id_vars='cod_prop',
+        value_vars=['riqueza_observada', 'meta_riqueza'],
+        var_name='Tipo',
+        value_name='Riqueza'
+    )
+    
+    df_riqueza_plot['Tipo'] = df_riqueza_plot['Tipo'].map({
+        'riqueza_observada': 'Observada',
+        'meta_riqueza': 'Meta'
+    })
+    
+    fig_riqueza = px.bar(
+        df_riqueza_plot,
+        x='cod_prop',
+        y='Riqueza',
+        color='Tipo',
+        barmode='group',
+        title='Riqueza de Espécies: Observada vs Meta',
+        labels={'Riqueza': 'Número de Espécies', 'cod_prop': 'Propriedade'},
+        color_discrete_map={'Observada': '#4CAF50', 'Meta': '#FF9800'}
+    )
+    
+    fig_riqueza.update_layout(height=400)
+    st.plotly_chart(fig_riqueza, use_container_width=True)
+    
+    # Tabela resumo
+    st.markdown("#### 📊 Resumo por Propriedade")
+    
+    df_resumo_riqueza = dados_restauracao[['cod_prop', 'riqueza_observada', 'meta_riqueza', 'riqueza_adequada']].copy()
+    df_resumo_riqueza['Status'] = df_resumo_riqueza['riqueza_adequada'].apply(
+        lambda x: '✅ Adequada' if x else '⚠️ Abaixo da Meta'
+    )
+    df_resumo_riqueza = df_resumo_riqueza.drop('riqueza_adequada', axis=1)
+    
+    st.dataframe(df_resumo_riqueza, use_container_width=True)
+
+def exibir_analise_por_uts(df_caracterizacao, df_inventario):
+    """Exibe análise detalhada por UTs dentro das propriedades"""
+    st.markdown("### 📊 Análise Detalhada por Unidades de Trabalho (UTs)")
+    
+    # Seletor de propriedade
+    propriedades_disponiveis = []
+    if 'cod_prop' in df_caracterizacao.columns:
+        propriedades_disponiveis = sorted(df_caracterizacao['cod_prop'].dropna().unique())
+    
+    if not propriedades_disponiveis:
+        st.warning("Nenhuma propriedade encontrada para análise por UTs")
+        return
+    
+    propriedade_selecionada = st.selectbox("Selecione uma propriedade para análise detalhada:", propriedades_disponiveis)
+    
+    if propriedade_selecionada:
+        # Filtrar dados da propriedade
+        df_carac_prop = df_caracterizacao[df_caracterizacao['cod_prop'] == propriedade_selecionada]
+        
+        cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+        if cod_parc_col:
+            df_inv_prop = df_inventario[df_inventario[cod_parc_col].astype(str).str.startswith(f"{propriedade_selecionada}_")]
+        else:
+            df_inv_prop = pd.DataFrame()
+        
+        # Análise por UT
+        if len(df_carac_prop) > 0:
+            # Cobertura por UT
+            if 'ut' in df_carac_prop.columns:
+                st.markdown("#### 🌿 Cobertura de Copa por UT")
+                
+                cobertura_col = encontrar_coluna(df_carac_prop, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
+                if cobertura_col:
+                    df_cobertura_ut = df_carac_prop.groupby('ut')[cobertura_col].mean().reset_index()
+                    df_cobertura_ut.columns = ['UT', 'Cobertura_Copa']
+                    df_cobertura_ut['Status'] = df_cobertura_ut['Cobertura_Copa'].apply(
+                        lambda x: '✅ Adequada' if x >= 80 else '⚠️ Abaixo da Meta'
+                    )
+                    
+                    fig_ut_cobertura = px.bar(
+                        df_cobertura_ut,
+                        x='UT',
+                        y='Cobertura_Copa',
+                        title=f'Cobertura de Copa por UT - Propriedade {propriedade_selecionada}',
+                        color='Cobertura_Copa',
+                        color_continuous_scale='Greens'
+                    )
+                    fig_ut_cobertura.add_hline(y=80, line_dash="dash", line_color="red")
+                    fig_ut_cobertura.update_layout(height=300)
+                    st.plotly_chart(fig_ut_cobertura, use_container_width=True)
+                    
+                    st.dataframe(df_cobertura_ut, use_container_width=True)
+        
+        # Riqueza por UT (do inventário)
+        if len(df_inv_prop) > 0 and cod_parc_col:
+            st.markdown("#### 🌳 Riqueza de Espécies por UT")
+            
+            especies_col = encontrar_coluna(df_inv_prop, ['especies', 'especie', 'species', 'sp'])
+            if especies_col:
+                # Extrair UT do cod_parc
+                df_inv_prop_copy = df_inv_prop.copy()
+                df_inv_prop_copy['UT'] = df_inv_prop_copy[cod_parc_col].astype(str).str.split('_').str[1]
+                
+                df_riqueza_ut = df_inv_prop_copy.groupby('UT')[especies_col].nunique().reset_index()
+                df_riqueza_ut.columns = ['UT', 'Riqueza']
+                
+                fig_ut_riqueza = px.bar(
+                    df_riqueza_ut,
+                    x='UT',
+                    y='Riqueza',
+                    title=f'Riqueza de Espécies por UT - Propriedade {propriedade_selecionada}',
+                    color='Riqueza',
+                    color_continuous_scale='Viridis'
+                )
+                fig_ut_riqueza.update_layout(height=300)
+                st.plotly_chart(fig_ut_riqueza, use_container_width=True)
+                
+                st.dataframe(df_riqueza_ut, use_container_width=True)
 
 # ============================================================================
 # FUNÇÃO PRINCIPAL - DEVE ESTAR NO FINAL
