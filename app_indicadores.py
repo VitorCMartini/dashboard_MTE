@@ -6,7 +6,7 @@ import numpy as np
 from math import log
 import locale
 
-# Configuração da página
+# Configuracao da pagina
 st.set_page_config(
     page_title="Dashboard - Indicadores Ambientais",
     page_icon="🌿",
@@ -15,28 +15,28 @@ st.set_page_config(
 )
 
 # ===============================================
-# FUNÇÕES DE FORMATAÇÃO BRASILEIRA (ABNT)
+# FUNCOES DE FORMATACAO BRASILEIRA (ABNT)
 # ===============================================
 
 def formatar_numero_br(numero, decimais=2):
     """
-    Formata números seguindo padrão brasileiro (ABNT):
-    - Vírgula como separador decimal
+    Formata numeros seguindo padrao brasileiro (ABNT):
+    - Virgula como separador decimal
     - Ponto como separador de milhares
     """
     try:
         if pd.isna(numero) or numero is None:
             return "N/A"
         
-        # Converter para float se necessário
+        # Converter para float se necessario
         num = float(numero)
         
-        # Formatação manual para garantir padrão brasileiro
+        # Formatacao manual para garantir padrao brasileiro
         if decimais == 0:
-            # Para números inteiros
+            # Para numeros inteiros
             numero_str = f"{int(num):,}".replace(",", ".")
         else:
-            # Para números com decimais
+            # Para numeros com decimais
             numero_str = f"{num:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
         return numero_str
@@ -45,9 +45,9 @@ def formatar_numero_br(numero, decimais=2):
 
 def formatar_porcentagem_br(numero, decimais=1):
     """
-    Formata porcentagens seguindo padrão brasileiro:
-    - Vírgula como separador decimal
-    - Símbolo % após o número
+    Formata porcentagens seguindo padrao brasileiro:
+    - Virgula como separador decimal
+    - Simbolo % apos o numero
     """
     try:
         if pd.isna(numero) or numero is None:
@@ -60,7 +60,7 @@ def formatar_porcentagem_br(numero, decimais=1):
 
 def formatar_area_br(area_ha):
     """
-    Formata área em hectares seguindo padrão brasileiro
+    Formata area em hectares seguindo padrao brasileiro
     """
     try:
         if pd.isna(area_ha) or area_ha is None:
@@ -73,7 +73,7 @@ def formatar_area_br(area_ha):
 
 def formatar_densidade_br(densidade):
     """
-    Formata densidade seguindo padrão brasileiro
+    Formata densidade seguindo padrao brasileiro
     """
     try:
         if pd.isna(densidade) or densidade is None:
@@ -86,7 +86,7 @@ def formatar_densidade_br(densidade):
 
 def formatar_dataframe_br(df, colunas_numericas=None, colunas_porcentagem=None):
     """
-    Aplica formatação brasileira a um DataFrame para exibição
+    Aplica formatacao brasileira a um DataFrame para exibicao
     """
     df_formatado = df.copy()
     
@@ -104,7 +104,7 @@ def formatar_dataframe_br(df, colunas_numericas=None, colunas_porcentagem=None):
 
 def metric_compacta(label, value, help_text=None):
     """
-    Cria uma métrica compacta com tamanho de fonte otimizado
+    Cria uma metrica compacta com tamanho de fonte otimizado
     """
     help_html = f"<span title='{help_text}'>ⓘ</span>" if help_text else ""
     
@@ -125,11 +125,11 @@ def metric_compacta(label, value, help_text=None):
     </div>
     """, unsafe_allow_html=True)
 
-# Função para limpeza e padronização de dados
+# Funcao para limpeza e padronizacao de dados
 def limpar_e_padronizar_dados(df):
     """
     Limpa e padroniza os dados do DataFrame:
-    1. Remove espaços desnecessários
+    1. Remove espacos desnecessarios
     2. Converte para minúsculas
     3. Capitaliza a primeira letra de cada célula
     """
@@ -1920,7 +1920,7 @@ def analisar_alturas(df_inventario, col_ht):
     with col3:
         st.metric("Mediana", f"{alturas.median():.1f}m")
     with col4:
-        st.metric("Desvio Padrão", f"{alturas.std():.1f}m")
+        st.metric("Desvio Padrao", f"{alturas.std():.1f}m")
     
     # Valores suspeitos
     problemas = {
@@ -1976,7 +1976,7 @@ def analisar_dap(df_inventario, col_dap):
     with col3:
         st.metric("Mediano", f"{daps_cm.median():.1f}cm")
     with col4:
-        st.metric("Desvio Padrão", f"{daps_cm.std():.1f}cm")
+        st.metric("Desvio Padrao", f"{daps_cm.std():.1f}cm")
     
     # Valores suspeitos
     problemas = {
@@ -2850,7 +2850,7 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         # === 2. DENSIDADE DE REGENERANTES ===
         # Detectar método de restauração
         metodo_col = encontrar_coluna(df_carac_prop, ['metodo_restauracao', 'metodo', 'tecnica_restauracao'])
-        metodo_restauracao = 'Ativa'  # Padrão
+        metodo_restauracao = 'Ativa'  # Padrao
         
         if metodo_col and len(df_carac_prop) > 0:
             metodo_valor = df_carac_prop[metodo_col].iloc[0]
@@ -2898,9 +2898,9 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
             if len(meta_riqueza) > 0:
                 meta_riqueza = meta_riqueza.iloc[0]
             else:
-                meta_riqueza = 30  # Valor padrão
+                meta_riqueza = 30  # Valor padrao
         else:
-            meta_riqueza = 30  # Valor padrão
+            meta_riqueza = 30  # Valor padrao
         
         resultado['meta_riqueza'] = meta_riqueza
         # Meta baseada em espécies nativas
