@@ -1842,18 +1842,598 @@ def relatorio_auditoria_completo(df_caracterizacao, df_inventario):
     return problemas_encontrados, total_verificacoes
 
 def pagina_analises_avancadas(df_caracterizacao, df_inventario):
-    """Página para análises avançadas (implementação futura)"""
+    """Página para análises avançadas com foco em fitossociologia"""
     st.header("📈 Análises Avançadas")
-    st.info("🚧 Esta seção está em desenvolvimento. Futuras funcionalidades incluirão:")
+    st.markdown("*Análises fitossociológicas e índices ecológicos avançados*")
     
-    with st.expander("🔮 Funcionalidades Planejadas"):
+    # Filtros específicos para análises avançadas
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("🔬 Filtros - Análises Avançadas")
+        
+        # Filtro de propriedade
+        if 'cod_prop' in df_caracterizacao.columns:
+            propriedades_disponiveis = df_caracterizacao['cod_prop'].dropna().unique()
+            propriedades_selecionadas = st.multiselect(
+                "Selecionar Propriedades",
+                options=propriedades_disponiveis,
+                default=list(propriedades_disponiveis)[:5] if len(propriedades_disponiveis) > 5 else list(propriedades_disponiveis),
+                help="Selecione as propriedades para análise"
+            )
+        else:
+            propriedades_selecionadas = []
+        
+        # Aplicar filtros
+        if propriedades_selecionadas:
+            df_carac_filtrado = df_caracterizacao[df_caracterizacao['cod_prop'].isin(propriedades_selecionadas)]
+            
+            # Filtrar inventário baseado nas propriedades selecionadas
+            cod_parc_col = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+            if cod_parc_col:
+                # Se existe coluna cod_parc na caracterização, usar ela para filtrar
+                if 'cod_parc' in df_carac_filtrado.columns:
+                    parcelas_validas = df_carac_filtrado['cod_parc'].dropna().unique()
+                    df_inv_filtrado = df_inventario[df_inventario[cod_parc_col].astype(str).isin([str(p) for p in parcelas_validas])]
+                else:
+                    # Se não tem cod_parc na caracterização, tentar filtrar por propriedade diretamente no inventário
+                    # Extrair propriedade do cod_parc do inventário (formato PROP_UT)
+                    df_inv_temp = df_inventario.copy()
+                    df_inv_temp['prop_extraida'] = df_inv_temp[cod_parc_col].astype(str).str.split('_').str[0]
+                    df_inv_filtrado = df_inv_temp[df_inv_temp['prop_extraida'].isin([str(p) for p in propriedades_selecionadas])]
+                    if 'prop_extraida' in df_inv_filtrado.columns:
+                        df_inv_filtrado = df_inv_filtrado.drop('prop_extraida', axis=1)
+            else:
+                # Se não encontrou cod_parc, usar todos os dados do inventário
+                df_inv_filtrado = df_inventario
+        else:
+            df_carac_filtrado = df_caracterizacao
+            df_inv_filtrado = df_inventario
+        
+        # Debug: mostrar informações de filtragem
+        st.sidebar.markdown("**🔍 Debug - Dados Filtrados:**")
+        st.sidebar.write(f"Caracterização: {len(df_carac_filtrado)} registros")
+        st.sidebar.write(f"Inventário: {len(df_inv_filtrado)} registros")
+        
+        if len(propriedades_selecionadas) > 0:
+            st.sidebar.write(f"Propriedades: {', '.join(map(str, propriedades_selecionadas))}")
+    
+    # Abas principais
+    tab1, tab2, tab3 = st.tabs([
+        "🌿 Análise Fitossociológica", 
+        "📊 Índices de Diversidade",
+        "📈 Visualizações Avançadas"
+    ])
+    
+    # ==================== ABA 1: FITOSSOCIOLOGIA ====================
+    with tab1:
+        st.subheader("🌿 Análise Fitossociológica")
+        
+        # Informações sobre metodologia
+        with st.expander("ℹ️ Sobre Análise Fitossociológica"):
+            st.markdown("""
+            ### 📚 Metodologia Fitossociológica
+            
+            **🔬 Para áreas de CENSO:**
+            - **Densidade Relativa (DR)**: (Ni/N) × 100
+            - **Dominância Relativa (DoR)**: (ABi/ABtotal) × 100
+            - **Valor de Cobertura (VC)**: (DR + DoR) / 2
+            
+            **📏 Para áreas de PARCELAS:**
+            - **Densidade Relativa (DR)**: (Ni/N) × 100
+            - **Dominância Relativa (DoR)**: (ABi/ABtotal) × 100
+            - **Frequência Relativa (FR)**: (Fi/Ftotal) × 100
+            - **Valor de Importância (VI)**: (DR + DoR + FR) / 3
+            
+            Onde: Ni = número de indivíduos da espécie i, N = total de indivíduos, 
+            ABi = área basal da espécie i, Fi = frequência da espécie i
+            """)
+        
+        # Verificar se há dados suficientes
+        if len(df_inv_filtrado) == 0:
+            st.warning("⚠️ Nenhum dado de inventário disponível com os filtros selecionados.")
+            return
+        
+        # Detectar técnica de amostragem
+        tecnica_col = encontrar_coluna(df_carac_filtrado, ['tecnica_am', 'tecnica', 'metodo'])
+        
+        if tecnica_col and len(df_carac_filtrado) > 0:
+            tecnicas_presentes = df_carac_filtrado[tecnica_col].str.lower().unique()
+            tem_censo = any('censo' in str(t) for t in tecnicas_presentes)
+            tem_parcelas = any('parcela' in str(t) or 'plot' in str(t) for t in tecnicas_presentes)
+        else:
+            # Fallback: assumir parcelas
+            tem_censo = False
+            tem_parcelas = True
+        
+        # Mostrar informações sobre as técnicas detectadas
+        col_info1, col_info2 = st.columns(2)
+        with col_info1:
+            if tem_censo:
+                st.info("🔍 **Técnica detectada**: Censo (total)")
+            if tem_parcelas:
+                st.info("📏 **Técnica detectada**: Parcelas (amostragem)")
+        
+        with col_info2:
+            if len(propriedades_selecionadas) > 1:
+                st.warning(f"⚡ **Múltiplas propriedades**: {len(propriedades_selecionadas)} selecionadas")
+            else:
+                st.success("✅ **Análise individual** por propriedade")
+        
+        # Análise por técnica
+        if len(propriedades_selecionadas) <= 1:
+            # Análise unificada para uma propriedade
+            if tem_censo and not tem_parcelas:
+                st.markdown("### 🔬 Análise Fitossociológica - Método CENSO")
+                calcular_fitossociologia_censo(df_inv_filtrado, df_carac_filtrado)
+                
+            elif tem_parcelas and not tem_censo:
+                st.markdown("### 📏 Análise Fitossociológica - Método PARCELAS")
+                calcular_fitossociologia_parcelas(df_inv_filtrado, df_carac_filtrado)
+                
+            elif tem_censo and tem_parcelas:
+                st.markdown("### 🔀 Análise Fitossociológica - Métodos MISTOS")
+                
+                # Separar dados por técnica
+                dados_censo = df_carac_filtrado[df_carac_filtrado[tecnica_col].str.contains('censo', case=False, na=False)]
+                dados_parcelas = df_carac_filtrado[~df_carac_filtrado[tecnica_col].str.contains('censo', case=False, na=False)]
+                
+                if len(dados_censo) > 0:
+                    st.markdown("#### 🔬 Área de Censo:")
+                    props_censo = dados_censo['cod_prop'].unique() if 'cod_prop' in dados_censo.columns else []
+                    df_inv_censo = filtrar_inventario_por_propriedades(df_inv_filtrado, props_censo) if len(props_censo) > 0 else pd.DataFrame()
+                    if len(df_inv_censo) > 0:
+                        calcular_fitossociologia_censo(df_inv_censo, dados_censo)
+                
+                if len(dados_parcelas) > 0:
+                    st.markdown("#### 📏 Área de Parcelas:")
+                    props_parcelas = dados_parcelas['cod_prop'].unique() if 'cod_prop' in dados_parcelas.columns else []
+                    df_inv_parcelas = filtrar_inventario_por_propriedades(df_inv_filtrado, props_parcelas) if len(props_parcelas) > 0 else pd.DataFrame()
+                    if len(df_inv_parcelas) > 0:
+                        calcular_fitossociologia_parcelas(df_inv_parcelas, dados_parcelas)
+        
+        else:
+            # Análise separada para múltiplas propriedades
+            st.markdown("### 🏞️ Análise Comparativa por Propriedade")
+            
+            # Separar análise por classe de técnica
+            if tem_censo:
+                st.markdown("#### 🔬 Propriedades com Método CENSO")
+                propriedades_censo = analisar_propriedades_por_tecnica(
+                    df_inv_filtrado, df_carac_filtrado, propriedades_selecionadas, 'censo'
+                )
+                if len(propriedades_censo) > 0:
+                    for prop in propriedades_censo:
+                        with st.expander(f"🔍 Propriedade {prop} - CENSO"):
+                            df_prop = filtrar_inventario_por_propriedades(df_inv_filtrado, [prop])
+                            df_carac_prop = df_carac_filtrado[df_carac_filtrado['cod_prop'] == prop] if 'cod_prop' in df_carac_filtrado.columns else df_carac_filtrado
+                            calcular_fitossociologia_censo(df_prop, df_carac_prop)
+            
+            if tem_parcelas:
+                st.markdown("#### 📏 Propriedades com Método PARCELAS")
+                propriedades_parcelas = analisar_propriedades_por_tecnica(
+                    df_inv_filtrado, df_carac_filtrado, propriedades_selecionadas, 'parcelas'
+                )
+                if len(propriedades_parcelas) > 0:
+                    for prop in propriedades_parcelas:
+                        with st.expander(f"📐 Propriedade {prop} - PARCELAS"):
+                            df_prop = filtrar_inventario_por_propriedades(df_inv_filtrado, [prop])
+                            df_carac_prop = df_carac_filtrado[df_carac_filtrado['cod_prop'] == prop] if 'cod_prop' in df_carac_filtrado.columns else df_carac_filtrado
+                            calcular_fitossociologia_parcelas(df_prop, df_carac_prop)
+    
+    # ==================== ABA 2: ÍNDICES DE DIVERSIDADE ====================
+    with tab2:
+        st.subheader("📊 Índices de Diversidade")
+        calcular_indices_diversidade(df_inv_filtrado, propriedades_selecionadas)
+    
+    # ==================== ABA 3: VISUALIZAÇÕES AVANÇADAS ====================
+    with tab3:
+        st.subheader("📈 Visualizações Avançadas")
+        gerar_visualizacoes_avancadas(df_inv_filtrado, df_carac_filtrado)
+
+def calcular_fitossociologia_censo(df_inventario, df_caracterizacao):
+    """Calcula parâmetros fitossociológicos para método de censo"""
+    try:
+        if len(df_inventario) == 0:
+            st.warning("⚠️ Nenhum dado de inventário disponível")
+            return
+        
+        # Encontrar colunas necessárias
+        col_especie = encontrar_coluna(df_inventario, ['especie', 'especies', 'species', 'sp'])
+        col_dap = encontrar_coluna(df_inventario, ['dap', 'dap_cm', 'diameter'])
+        col_plaqueta = encontrar_coluna(df_inventario, ['plaqueta', 'plaq', 'id'])
+        
+        if not col_especie:
+            st.error("❌ Coluna de espécie não encontrada")
+            return
+        
+        # Preparar dados
+        df_trabalho = df_inventario.copy()
+        
+        # Calcular área basal se DAP disponível
+        area_basal_disponivel = False
+        if col_dap:
+            daps = pd.to_numeric(df_trabalho[col_dap], errors='coerce')
+            
+            # Ajustar unidade se necessário (mm para cm)
+            if daps.median() > 100:
+                daps = daps / 10
+            
+            # Calcular área basal em m² (π * (DAP/2)²) / 10000 para converter cm² para m²
+            df_trabalho['area_basal_m2'] = (np.pi * (daps/2)**2) / 10000
+            area_basal_disponivel = True
+        
+        # Agrupar por espécie
+        if col_plaqueta:
+            # Usar plaquetas para contar indivíduos únicos
+            fitossocio = df_trabalho.groupby(col_especie).agg({
+                col_plaqueta: 'nunique',  # Número de indivíduos únicos
+                'area_basal_m2': 'sum' if area_basal_disponivel else 'count'
+            }).reset_index()
+            fitossocio.columns = [col_especie, 'num_individuos', 'area_basal_total']
+        else:
+            # Fallback: contar registros
+            fitossocio = df_trabalho.groupby(col_especie).agg({
+                col_especie: 'count',
+                'area_basal_m2': 'sum' if area_basal_disponivel else 'count'
+            }).reset_index()
+            fitossocio.columns = [col_especie, 'num_individuos', 'area_basal_total']
+        
+        # Calcular totais
+        total_individuos = fitossocio['num_individuos'].sum()
+        total_area_basal = fitossocio['area_basal_total'].sum() if area_basal_disponivel else 0
+        
+        # Calcular parâmetros fitossociológicos
+        fitossocio['densidade_relativa'] = (fitossocio['num_individuos'] / total_individuos) * 100
+        
+        if area_basal_disponivel and total_area_basal > 0:
+            fitossocio['dominancia_relativa'] = (fitossocio['area_basal_total'] / total_area_basal) * 100
+            fitossocio['valor_cobertura'] = (fitossocio['densidade_relativa'] + fitossocio['dominancia_relativa']) / 2
+        else:
+            fitossocio['dominancia_relativa'] = 0
+            fitossocio['valor_cobertura'] = fitossocio['densidade_relativa'] / 2
+        
+        # Ordenar por valor de cobertura
+        fitossocio = fitossocio.sort_values('valor_cobertura', ascending=False).reset_index(drop=True)
+        
+        # Renomear colunas para exibição
+        colunas_display = {
+            col_especie: 'Espécie',
+            'num_individuos': 'N° Indivíduos',
+            'area_basal_total': 'Área Basal (m²)' if area_basal_disponivel else 'AB (não calc.)',
+            'densidade_relativa': 'DR (%)',
+            'dominancia_relativa': 'DoR (%)',
+            'valor_cobertura': 'VC (%)'
+        }
+        
+        fitossocio_display = fitossocio.rename(columns=colunas_display)
+        
+        # Arredondar valores numéricos
+        colunas_numericas = ['N° Indivíduos', 'DR (%)', 'DoR (%)', 'VC (%)']
+        if area_basal_disponivel:
+            colunas_numericas.append('Área Basal (m²)')
+            fitossocio_display['Área Basal (m²)'] = fitossocio_display['Área Basal (m²)'].round(4)
+        
+        fitossocio_display['DR (%)'] = fitossocio_display['DR (%)'].round(2)
+        fitossocio_display['DoR (%)'] = fitossocio_display['DoR (%)'].round(2)
+        fitossocio_display['VC (%)'] = fitossocio_display['VC (%)'].round(2)
+        
+        # Exibir resultados
+        st.write("**📋 Tabela Fitossociológica - Método CENSO**")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total de Espécies", len(fitossocio_display))
+        with col2:
+            st.metric("Total de Indivíduos", total_individuos)
+        with col3:
+            if area_basal_disponivel:
+                st.metric("Área Basal Total", f"{total_area_basal:.3f} m²")
+            else:
+                st.metric("Área Basal", "Não calculada")
+        
+        # Tabela principal
+        st.dataframe(fitossocio_display, use_container_width=True, height=400)
+        
+        # Download
+        csv = fitossocio_display.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Tabela Fitossociológica (CSV)",
+            data=csv,
+            file_name="fitossociologia_censo.csv",
+            mime="text/csv"
+        )
+        
+        # Gráfico das espécies mais importantes
+        if len(fitossocio_display) > 0:
+            st.markdown("#### 📊 Top 10 Espécies por Valor de Cobertura")
+            top_especies = fitossocio_display.head(10)
+            
+            fig = px.bar(
+                top_especies,
+                x='VC (%)',
+                y='Espécie',
+                orientation='h',
+                title="Valor de Cobertura das Principais Espécies",
+                color='VC (%)',
+                color_continuous_scale='Greens'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Erro no cálculo fitossociológico (censo): {e}")
+
+def calcular_fitossociologia_parcelas(df_inventario, df_caracterizacao):
+    """Calcula parâmetros fitossociológicos para método de parcelas"""
+    try:
+        if len(df_inventario) == 0:
+            st.warning("⚠️ Nenhum dado de inventário disponível")
+            return
+        
+        # Encontrar colunas necessárias
+        col_especie = encontrar_coluna(df_inventario, ['especie', 'especies', 'species', 'sp'])
+        col_dap = encontrar_coluna(df_inventario, ['dap', 'dap_cm', 'diameter'])
+        col_parc = encontrar_coluna(df_inventario, ['cod_parc', 'parcela', 'plot'])
+        col_plaqueta = encontrar_coluna(df_inventario, ['plaqueta', 'plaq', 'id'])
+        
+        if not col_especie or not col_parc:
+            st.error("❌ Colunas essenciais não encontradas (espécie ou parcela)")
+            return
+        
+        # Preparar dados
+        df_trabalho = df_inventario.copy()
+        
+        # Calcular área basal se DAP disponível
+        area_basal_disponivel = False
+        if col_dap:
+            daps = pd.to_numeric(df_trabalho[col_dap], errors='coerce')
+            
+            # Ajustar unidade se necessário
+            if daps.median() > 100:
+                daps = daps / 10
+            
+            df_trabalho['area_basal_m2'] = (np.pi * (daps/2)**2) / 10000
+            area_basal_disponivel = True
+        
+        # Calcular frequência por espécie (número de parcelas onde a espécie ocorre)
+        frequencia_especies = df_trabalho.groupby(col_especie)[col_parc].nunique().reset_index()
+        frequencia_especies.columns = [col_especie, 'frequencia']
+        
+        # Calcular número de indivíduos por espécie
+        if col_plaqueta:
+            individuos_especies = df_trabalho.groupby(col_especie)[col_plaqueta].nunique().reset_index()
+        else:
+            individuos_especies = df_trabalho.groupby(col_especie).size().reset_index()
+        individuos_especies.columns = [col_especie, 'num_individuos']
+        
+        # Calcular área basal por espécie
+        if area_basal_disponivel:
+            area_basal_especies = df_trabalho.groupby(col_especie)['area_basal_m2'].sum().reset_index()
+            area_basal_especies.columns = [col_especie, 'area_basal_total']
+        else:
+            area_basal_especies = individuos_especies.copy()
+            area_basal_especies['area_basal_total'] = 0
+        
+        # Combinar dados
+        fitossocio = frequencia_especies.merge(individuos_especies, on=col_especie)
+        fitossocio = fitossocio.merge(area_basal_especies, on=col_especie)
+        
+        # Calcular totais
+        total_individuos = fitossocio['num_individuos'].sum()
+        total_area_basal = fitossocio['area_basal_total'].sum() if area_basal_disponivel else 0
+        total_frequencia = fitossocio['frequencia'].sum()
+        total_parcelas = df_trabalho[col_parc].nunique()
+        
+        # Calcular parâmetros fitossociológicos
+        fitossocio['densidade_relativa'] = (fitossocio['num_individuos'] / total_individuos) * 100
+        fitossocio['frequencia_relativa'] = (fitossocio['frequencia'] / total_frequencia) * 100
+        
+        if area_basal_disponivel and total_area_basal > 0:
+            fitossocio['dominancia_relativa'] = (fitossocio['area_basal_total'] / total_area_basal) * 100
+            fitossocio['valor_importancia'] = (fitossocio['densidade_relativa'] + fitossocio['dominancia_relativa'] + fitossocio['frequencia_relativa']) / 3
+        else:
+            fitossocio['dominancia_relativa'] = 0
+            fitossocio['valor_importancia'] = (fitossocio['densidade_relativa'] + fitossocio['frequencia_relativa']) / 2
+        
+        # Ordenar por valor de importância
+        fitossocio = fitossocio.sort_values('valor_importancia', ascending=False).reset_index(drop=True)
+        
+        # Renomear colunas para exibição
+        colunas_display = {
+            col_especie: 'Espécie',
+            'frequencia': 'Frequência',
+            'num_individuos': 'N° Indivíduos',
+            'area_basal_total': 'Área Basal (m²)' if area_basal_disponivel else 'AB (não calc.)',
+            'densidade_relativa': 'DR (%)',
+            'dominancia_relativa': 'DoR (%)',
+            'frequencia_relativa': 'FR (%)',
+            'valor_importancia': 'VI (%)'
+        }
+        
+        fitossocio_display = fitossocio.rename(columns=colunas_display)
+        
+        # Arredondar valores numéricos
+        fitossocio_display['DR (%)'] = fitossocio_display['DR (%)'].round(2)
+        fitossocio_display['DoR (%)'] = fitossocio_display['DoR (%)'].round(2)
+        fitossocio_display['FR (%)'] = fitossocio_display['FR (%)'].round(2)
+        fitossocio_display['VI (%)'] = fitossocio_display['VI (%)'].round(2)
+        
+        if area_basal_disponivel:
+            fitossocio_display['Área Basal (m²)'] = fitossocio_display['Área Basal (m²)'].round(4)
+        
+        # Exibir resultados
+        st.write("**📋 Tabela Fitossociológica - Método PARCELAS**")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total de Espécies", len(fitossocio_display))
+        with col2:
+            st.metric("Total de Indivíduos", total_individuos)
+        with col3:
+            st.metric("Total de Parcelas", total_parcelas)
+        with col4:
+            if area_basal_disponivel:
+                st.metric("Área Basal Total", f"{total_area_basal:.3f} m²")
+            else:
+                st.metric("Área Basal", "Não calculada")
+        
+        # Tabela principal
+        st.dataframe(fitossocio_display, use_container_width=True, height=400)
+        
+        # Download
+        csv = fitossocio_display.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Tabela Fitossociológica (CSV)",
+            data=csv,
+            file_name="fitossociologia_parcelas.csv",
+            mime="text/csv"
+        )
+        
+        # Gráfico das espécies mais importantes
+        if len(fitossocio_display) > 0:
+            st.markdown("#### 📊 Top 10 Espécies por Valor de Importância")
+            top_especies = fitossocio_display.head(10)
+            
+            fig = px.bar(
+                top_especies,
+                x='VI (%)',
+                y='Espécie',
+                orientation='h',
+                title="Valor de Importância das Principais Espécies",
+                color='VI (%)',
+                color_continuous_scale='Viridis'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Erro no cálculo fitossociológico (parcelas): {e}")
+
+def analisar_propriedades_por_tecnica(df_inventario, df_caracterizacao, propriedades, tecnica):
+    """Identifica propriedades que usam uma técnica específica"""
+    try:
+        tecnica_col = encontrar_coluna(df_caracterizacao, ['tecnica_am', 'tecnica', 'metodo'])
+        
+        if not tecnica_col:
+            return propriedades  # Retorna todas se não conseguir identificar
+        
+        df_tecnica = df_caracterizacao[df_caracterizacao['cod_prop'].isin(propriedades)] if 'cod_prop' in df_caracterizacao.columns else df_caracterizacao
+        
+        if tecnica.lower() == 'censo':
+            props_tecnica = df_tecnica[df_tecnica[tecnica_col].str.contains('censo', case=False, na=False)]['cod_prop'].unique()
+        else:  # parcelas
+            props_tecnica = df_tecnica[~df_tecnica[tecnica_col].str.contains('censo', case=False, na=False)]['cod_prop'].unique()
+        
+        return list(props_tecnica)
+    
+    except Exception:
+        return []
+
+def calcular_indices_diversidade(df_inventario, propriedades_selecionadas):
+    """Calcula índices de diversidade"""
+    st.markdown("### 📊 Índices de Diversidade Ecológica")
+    
+    col_especie = encontrar_coluna(df_inventario, ['especie', 'especies', 'species', 'sp'])
+    
+    if not col_especie:
+        st.error("❌ Coluna de espécie não encontrada")
+        return
+    
+    try:
+        # Contar indivíduos por espécie
+        especies_count = df_inventario[col_especie].value_counts()
+        
+        if len(especies_count) == 0:
+            st.warning("⚠️ Nenhuma espécie encontrada")
+            return
+        
+        # Calcular índices
+        total_individuos = especies_count.sum()
+        riqueza = len(especies_count)
+        
+        # Índice de Shannon
+        shannon = -sum((count/total_individuos) * log(count/total_individuos) for count in especies_count)
+        
+        # Índice de Simpson
+        simpson = sum((count/total_individuos)**2 for count in especies_count)
+        simpson_diversidade = 1 - simpson
+        
+        # Equitabilidade de Pielou
+        if riqueza > 1:
+            equitabilidade = shannon / log(riqueza)
+        else:
+            equitabilidade = 0
+        
+        # Exibir resultados
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("🌺 Riqueza (S)", riqueza)
+        
+        with col2:
+            st.metric("🌍 Shannon (H')", f"{shannon:.3f}")
+        
+        with col3:
+            st.metric("🔄 Simpson (1-D)", f"{simpson_diversidade:.3f}")
+        
+        with col4:
+            st.metric("⚖️ Equitabilidade (J)", f"{equitabilidade:.3f}")
+        
+        # Interpretação dos índices
+        with st.expander("📖 Interpretação dos Índices"):
+            st.markdown(f"""
+            **🌺 Riqueza (S = {riqueza}):**
+            - Número total de espécies encontradas
+            
+            **🌍 Índice de Shannon (H' = {shannon:.3f}):**
+            - Valores típicos: 1.5 a 3.5
+            - {'Alto' if shannon > 3.0 else 'Médio' if shannon > 2.0 else 'Baixo'} valor de diversidade
+            
+            **🔄 Índice de Simpson (1-D = {simpson_diversidade:.3f}):**
+            - Varia de 0 a 1 (maior = mais diverso)
+            - {'Alta' if simpson_diversidade > 0.8 else 'Média' if simpson_diversidade > 0.6 else 'Baixa'} diversidade
+            
+            **⚖️ Equitabilidade de Pielou (J = {equitabilidade:.3f}):**
+            - Varia de 0 a 1 (maior = mais uniforme)
+            - {'Alta' if equitabilidade > 0.8 else 'Média' if equitabilidade > 0.6 else 'Baixa'} uniformidade
+            """)
+        
+        # Gráfico de distribuição de abundância
+        st.markdown("#### 📈 Curva de Abundância das Espécies")
+        
+        # Preparar dados para o gráfico
+        especies_ordenadas = especies_count.sort_values(ascending=False).reset_index()
+        especies_ordenadas['rank'] = range(1, len(especies_ordenadas) + 1)
+        especies_ordenadas.columns = ['Espécie', 'Abundância', 'Rank']
+        
+        fig = px.line(
+            especies_ordenadas,
+            x='Rank',
+            y='Abundância',
+            title="Curva de Rank-Abundância",
+            labels={'Rank': 'Ranking da Espécie', 'Abundância': 'Número de Indivíduos'},
+            markers=True
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Erro no cálculo de índices: {e}")
+
+def gerar_visualizacoes_avancadas(df_inventario, df_caracterizacao):
+    """Gera visualizações avançadas"""
+    st.markdown("### 📈 Visualizações Avançadas")
+    
+    # Placeholder para futuras visualizações
+    st.info("🚧 Seção em desenvolvimento. Visualizações futuras incluirão:")
+    
+    with st.expander("🎨 Visualizações Planejadas"):
         st.markdown("""
-        - 📊 **Gráficos Interativos**: Visualizações dinâmicas com Plotly
-        - 🗺️ **Mapas Geoespaciais**: Distribuição espacial das propriedades
-        - 📈 **Análises Temporais**: Evolução dos indicadores ao longo do tempo
-        - 🔄 **Comparações**: Entre propriedades, UTs e técnicas
-        - 📋 **Relatórios Personalizados**: Exportação em diferentes formatos
-        - 🧮 **Índices de Biodiversidade**: Shannon, Simpson, etc.
+        - 📊 **Gráficos de Diversidade**: Comparações entre áreas
+        - 🗺️ **Mapas de Distribuição**: Espacialização das espécies
+        - 📈 **Análises Temporais**: Evolução da comunidade
+        - 🔄 **Comparações Fitossociológicas**: Entre diferentes áreas
+        - 📋 **Relatórios Personalizados**: Exportação avançada
         """)
     
     st.warning("Volte em breve para acessar essas funcionalidades!")
