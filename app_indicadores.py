@@ -93,6 +93,9 @@ def show_descriptive_stats(df_carac, df_inv, title):
             cobertura_col = encontrar_coluna(df_carac, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
             if cobertura_col:
                 cobertura_media = pd.to_numeric(df_carac[cobertura_col], errors='coerce').mean()
+                # Converter de 0-1 para 0-100% se necessário
+                if cobertura_media <= 1:
+                    cobertura_media = cobertura_media * 100
                 st.metric("Cobertura de Copa (%)", f"{cobertura_media:.1f}")
             else:
                 st.metric("Cobertura de Copa (%)", "N/A")
@@ -2521,6 +2524,11 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
     # === RESUMO GERAL ===
     st.subheader("📊 Resumo Geral dos Indicadores")
     
+    # Debug: verificar colunas disponíveis
+    st.write("Colunas disponíveis:", list(dados_restauracao.columns))
+    st.write("Primeiras 3 linhas:")
+    st.dataframe(dados_restauracao.head(3))
+    
     # Métricas gerais
     col1, col2, col3, col4 = st.columns(4)
     
@@ -2533,12 +2541,18 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
         st.metric("Cobertura Copa ≥80%", f"{props_cobertura_ok}/{total_props}")
     
     with col3:
-        props_densidade_ok = len(dados_restauracao[dados_restauracao['densidade_adequada'] == True])
-        st.metric("Densidade Adequada", f"{props_densidade_ok}/{total_props}")
+        if 'densidade_adequada' in dados_restauracao.columns:
+            props_densidade_ok = len(dados_restauracao[dados_restauracao['densidade_adequada'] == True])
+            st.metric("Densidade Adequada", f"{props_densidade_ok}/{total_props}")
+        else:
+            st.metric("Densidade Adequada", "N/A")
     
     with col4:
-        props_riqueza_ok = len(dados_restauracao[dados_restauracao['riqueza_adequada'] == True])
-        st.metric("Riqueza Adequada", f"{props_riqueza_ok}/{total_props}")
+        if 'riqueza_adequada' in dados_restauracao.columns:
+            props_riqueza_ok = len(dados_restauracao[dados_restauracao['riqueza_adequada'] == True])
+            st.metric("Riqueza Adequada", f"{props_riqueza_ok}/{total_props}")
+        else:
+            st.metric("Riqueza Adequada", "N/A")
     
     # === ABAS DE ANÁLISE ===
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -2614,6 +2628,9 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         cobertura_col = encontrar_coluna(df_carac_prop, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
         if cobertura_col and len(df_carac_prop) > 0:
             cobertura_media = pd.to_numeric(df_carac_prop[cobertura_col], errors='coerce').mean()
+            # Converter de 0-1 para 0-100% se necessário
+            if cobertura_media <= 1:
+                cobertura_media = cobertura_media * 100
             resultado['cobertura_copa'] = cobertura_media
         else:
             resultado['cobertura_copa'] = 0
@@ -2806,6 +2823,10 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
         'meta_riqueza': 'Meta'
     })
     
+    # Calcular largura baseada no número de propriedades
+    num_props = len(dados_restauracao)
+    fig_width = max(800, num_props * 100)  # Mínimo 800px, 100px por propriedade
+    
     fig_riqueza = px.bar(
         df_riqueza_plot,
         x='cod_prop',
@@ -2817,8 +2838,29 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
         color_discrete_map={'Observada': '#4CAF50', 'Meta': '#FF9800'}
     )
     
-    fig_riqueza.update_layout(height=400)
-    st.plotly_chart(fig_riqueza, use_container_width=True)
+    # Configurar layout para permitir scroll horizontal
+    fig_riqueza.update_layout(
+        height=500,
+        width=fig_width,
+        xaxis_title="Propriedade",
+        yaxis_title="Número de Espécies",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+    
+    # Container com scroll horizontal
+    st.markdown("#### 📊 Gráfico de Riqueza (Role para o lado para ver todas as propriedades)")
+    
+    # Criar container scrollable
+    with st.container():
+        st.plotly_chart(fig_riqueza, use_container_width=False)
     
     # Tabela resumo
     st.markdown("#### 📊 Resumo por Propriedade")
