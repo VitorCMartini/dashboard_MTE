@@ -282,14 +282,22 @@ def show_descriptive_stats(df_carac, df_inv, title):
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            # Riqueza (espécies únicas, excluindo "Morto")
+            # Riqueza (especies unicas, excluindo "Morto" e altura > 0.5m)
             especies_col = encontrar_coluna(df_inv, ['especies', 'especie', 'species', 'sp'])
+            ht_col = encontrar_coluna(df_inv, ['ht', 'altura', 'height'])
+            
             if especies_col and len(df_inv) > 0:
-                # Filtrar espécies válidas (remover "Morto/Morta")
+                # Filtrar especies validas (remover "Morto/Morta")
                 df_especies_validas = df_inv[~df_inv[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+                
+                # Filtrar por altura > 0.5m se coluna disponivel
+                if ht_col:
+                    alturas = pd.to_numeric(df_especies_validas[ht_col], errors='coerce')
+                    df_especies_validas = df_especies_validas[alturas > 0.5]
+                
                 riqueza_total = df_especies_validas[especies_col].nunique()
                 
-                # Riqueza de espécies nativas
+                # Riqueza de especies nativas com altura > 0.5m
                 origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
                 if origem_col:
                     df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
@@ -976,22 +984,101 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
         # Gráficos de estrutura florestal
         col_graf1, col_graf2 = st.columns(2)
         
-        # Distribuição de alturas
+        # Distribuição de alturas por classes de desenvolvimento
         if ht_col and len(df_inv_filtered) > 0:
             with col_graf1:
-                st.write("**Distribuição de Alturas**")
-                alturas = pd.to_numeric(df_inv_filtered[ht_col], errors='coerce').dropna()
+                st.write("**Distribuição de Alturas por Classe**")
                 
-                if len(alturas) > 0:
-                    # Criar histograma
-                    fig_hist = px.histogram(
-                        x=alturas,
-                        nbins=15,
-                        title="Distribuição de Alturas",
-                        labels={'x': 'Altura (m)', 'y': 'Frequência'},
-                        color_discrete_sequence=['#2E8B57']
+                # Preparar dados com classificacao de desenvolvimento
+                df_temp = df_inv_filtered.copy()
+                df_temp['altura_num'] = pd.to_numeric(df_temp[ht_col], errors='coerce')
+                df_temp = df_temp.dropna(subset=['altura_num'])
+                
+                if len(df_temp) > 0:
+                    # Sistema simplificado de 3 classes
+                    dap_col = encontrar_coluna(df_temp, ['dap', 'DAP', 'diametro'])
+                    
+                    def classificar_desenvolvimento(row):
+                        altura = row['altura_num']
+                        
+                        if altura < 0.5:
+                            return "Plantula (< 0.5m)"
+                        elif dap_col and pd.notna(row[dap_col]):
+                            dap = row[dap_col]
+                            if dap < 5:
+                                return "Jovem (DAP < 5cm)"
+                            else:
+                                return "Adulto (DAP ≥ 5cm)"
+                        else:
+                            return "Jovem (DAP < 5cm)"
+                    
+                    df_temp['classe_desenvolvimento'] = df_temp.apply(classificar_desenvolvimento, axis=1)
+                    
+                    # Criar bins de altura manualmente para ter controle total
+                    min_altura = df_temp['altura_num'].min()
+                    max_altura = df_temp['altura_num'].max()
+                    bins = np.linspace(min_altura, max_altura, 11)  # 10 bins
+                    
+                    df_temp['faixa_altura'] = pd.cut(df_temp['altura_num'], bins=bins, precision=1)
+                    
+                    # Contar por faixa e classe
+                    contagem = df_temp.groupby(['faixa_altura', 'classe_desenvolvimento']).size().unstack(fill_value=0).reset_index()
+                    
+                    # Garantir que todas as classes existam
+                    todas_classes = ["Plantula (< 0.5m)", "Jovem (DAP < 5cm)", "Adulto (DAP ≥ 5cm)"]
+                    for classe in todas_classes:
+                        if classe not in contagem.columns:
+                            contagem[classe] = 0
+                    
+                    # Converter faixa de altura para string para o eixo x
+                    contagem['faixa_str'] = contagem['faixa_altura'].astype(str)
+                    contagem['faixa_midpoint'] = contagem['faixa_altura'].apply(lambda x: x.mid if pd.notna(x) else 0)
+                    
+                    # Criar dados para grafico empilhado
+                    dados_grafico = []
+                    for _, row in contagem.iterrows():
+                        for classe in todas_classes:
+                            if classe in contagem.columns:
+                                dados_grafico.append({
+                                    'Altura': row['faixa_midpoint'],
+                                    'Faixa': f"{row['faixa_midpoint']:.1f}m",
+                                    'Classe': classe,
+                                    'Quantidade': row[classe]
+                                })
+                    
+                    df_grafico = pd.DataFrame(dados_grafico)
+                    
+                    # Criar grafico de barras empilhadas
+                    fig_hist = px.bar(
+                        df_grafico,
+                        x='Faixa',
+                        y='Quantidade',
+                        color='Classe',
+                        title="Distribuição de Alturas por Classe de Desenvolvimento",
+                        labels={'Faixa': 'Altura (m)', 'Quantidade': 'Frequência'},
+                        color_discrete_map={
+                            "Plantula (< 0.5m)": "#90EE90",
+                            "Jovem (DAP < 5cm)": "#228B22", 
+                            "Adulto (DAP ≥ 5cm)": "#006400"
+                        },
+                        category_orders={"Classe": todas_classes}
                     )
-                    fig_hist.update_layout(showlegend=False, height=300)
+                    
+                    # Configurar para barras empilhadas
+                    fig_hist.update_layout(
+                        barmode='stack',  # Empilhamento garantido
+                        height=300,
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom", 
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
+                        xaxis_title="Altura (m)",
+                        yaxis_title="Frequência"
+                    )
                     st.plotly_chart(fig_hist, use_container_width=True)
         
         # Classes de desenvolvimento
@@ -1001,26 +1088,37 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                 alturas = pd.to_numeric(df_inv_filtered[ht_col], errors='coerce').dropna()
                 
                 if len(alturas) > 0:
-                    # Definir classes de desenvolvimento
-                    def classificar_desenvolvimento(altura):
-                        if altura < 1.5:
-                            return "Plântula (< 1.5m)"
-                        elif altura < 5:
-                            return "Jovem (1.5-5m)"
-                        elif altura < 15:
-                            return "Adulto (5-15m)"
-                        else:
-                            return "Emergente (> 15m)"
+                    # Sistema simplificado de 3 classes
+                    dap_col = encontrar_coluna(df_inv_filtered, ['dap', 'DAP', 'diametro'])
                     
-                    classes = alturas.apply(classificar_desenvolvimento)
+                    def classificar_desenvolvimento(row):
+                        altura = row[ht_col] if pd.notna(row[ht_col]) else 0
+                        
+                        if altura < 0.5:
+                            return "Plantula (< 0.5m)"
+                        elif dap_col and pd.notna(row[dap_col]):
+                            dap = row[dap_col]
+                            if dap < 5:
+                                return "Jovem (DAP < 5cm)"
+                            else:
+                                return "Adulto (DAP ≥ 5cm)"
+                        else:
+                            # Se nao tem DAP, assume jovem para plantas >= 0.5m
+                            return "Jovem (DAP < 5cm)"
+                    
+                    classes = df_inv_filtered.apply(classificar_desenvolvimento, axis=1)
                     classe_counts = classes.value_counts()
                     
-                    # Gráfico de pizza
+                    # Garantir ordem das classes
+                    ordem_classes = ["Plantula (< 0.5m)", "Jovem (DAP < 5cm)", "Adulto (DAP ≥ 5cm)"]
+                    classe_counts = classe_counts.reindex(ordem_classes, fill_value=0)
+                    
+                    # Grafico de pizza com cores verdes
                     fig_pie = px.pie(
                         values=classe_counts.values,
                         names=classe_counts.index,
                         title="Classes de Desenvolvimento",
-                        color_discrete_sequence=['#90EE90', '#228B22', '#006400', '#013220']
+                        color_discrete_sequence=['#90EE90', '#228B22', '#006400']
                     )
                     fig_pie.update_layout(height=300)
                     st.plotly_chart(fig_pie, use_container_width=True)
@@ -1030,7 +1128,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
         st.subheader("🌿 Dinâmica Sucessional")
         
         # Métricas de sucessão
-        col_suc1, col_suc2, col_suc3 = st.columns(3)
+        col_suc1, col_suc2, col_suc3, col_suc4 = st.columns(4)
         
         # Grupos sucessionais
         gsuc_col = encontrar_coluna(df_inv_filtered, ['g_suc', 'grupo_suc', 'sucessional'])
@@ -1042,22 +1140,53 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
                     perc_principal = (gsuc_dist.iloc[0] / len(df_inv_filtered)) * 100
                     st.metric("🌱 Grupo Dominante", f"{principal_gsuc}", f"{perc_principal:.1f}%")
         
-        # Riqueza de espécies
+        # Riqueza de especies (com filtros aplicados)
         especies_col = encontrar_coluna(df_inv_filtered, ['especies', 'especie', 'species', 'sp'])
+        ht_col = encontrar_coluna(df_inv_filtered, ['ht', 'altura', 'height'])
+        
         if especies_col and len(df_inv_filtered) > 0:
             with col_suc2:
-                riqueza = df_inv_filtered[especies_col].nunique()
-                st.metric("🌺 Riqueza", f"{riqueza} espécies")
+                # Aplicar filtros: remover "Morto" e altura > 0.5m
+                df_especies_validas = df_inv_filtered[~df_inv_filtered[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+                
+                # Filtrar por altura > 0.5m se coluna disponivel
+                if ht_col:
+                    alturas = pd.to_numeric(df_especies_validas[ht_col], errors='coerce')
+                    df_especies_validas = df_especies_validas[alturas > 0.5]
+                
+                riqueza = df_especies_validas[especies_col].nunique()
+                
+                # Calcular riqueza de nativas
+                origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
+                if origem_col:
+                    df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+                    riqueza_nativas = df_nativas[especies_col].nunique()
+                    st.metric("🌺 Riqueza", f"{riqueza} ({riqueza_nativas} nat.)")
+                else:
+                    st.metric("🌺 Riqueza", f"{riqueza} especies")
         
-        # Diversidade Shannon (simplificada)
+        # Diversidade Shannon
         if especies_col and len(df_inv_filtered) > 0:
             with col_suc3:
                 especies_count = df_inv_filtered[especies_col].value_counts()
                 if len(especies_count) > 1:
-                    # Cálculo básico de diversidade
+                    # Calculo de Shannon
                     total = especies_count.sum()
                     shannon = -sum((count/total) * log(count/total) for count in especies_count)
-                    st.metric("🌍 Índice Shannon", f"{shannon:.2f}")
+                    st.metric("🌍 Shannon (H')", f"{shannon:.2f}")
+        
+        # Equitabilidade de Pielou
+        if especies_col and len(df_inv_filtered) > 0:
+            with col_suc4:
+                especies_count = df_inv_filtered[especies_col].value_counts()
+                if len(especies_count) > 1:
+                    # Calculo de Shannon
+                    total = especies_count.sum()
+                    shannon = -sum((count/total) * log(count/total) for count in especies_count)
+                    # Calculo de Pielou
+                    riqueza = len(especies_count)
+                    equitabilidade = shannon / log(riqueza) if riqueza > 1 else 0
+                    st.metric("⚖️ Pielou (J)", f"{equitabilidade:.3f}")
         
         # Gráficos de sucessão
         col_graf_suc1, col_graf_suc2 = st.columns(2)
@@ -1104,40 +1233,52 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
         col_amb1, col_amb2, col_amb3, col_amb4 = st.columns(4)
         
         # Cobertura de copa
-        copa_col = encontrar_coluna(df_carac_filtered, ['cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
+        copa_col = encontrar_coluna(df_carac_filtered, ['(%)cobetura_nativa', '(%) cobetura_nativa', 'cobetura_nativa', 'cobertura_nativa', 'copa_nativa'])
         if copa_col and len(df_carac_filtered) > 0:
             with col_amb1:
                 copa_media = pd.to_numeric(df_carac_filtered[copa_col], errors='coerce').mean()
                 if pd.notna(copa_media):
+                    # Converter de 0-1 para 0-100% se necessario
+                    if copa_media <= 1:
+                        copa_media = copa_media * 100
                     # Definir cor baseada na qualidade
                     cor = "normal" if copa_media >= 50 else "inverse"
                     st.metric("🌳 Cobertura Copa", formatar_porcentagem_br(copa_media, 1), delta_color=cor)
         
         # Solo exposto (quanto menor, melhor)
-        solo_col = encontrar_coluna(df_carac_filtered, ['solo_exposto', 'solo exposto'])
+        solo_col = encontrar_coluna(df_carac_filtered, ['(%)solo exposto', '(%) solo exposto', 'solo_exposto', 'solo exposto'])
         if solo_col and len(df_carac_filtered) > 0:
             with col_amb2:
                 solo_medio = pd.to_numeric(df_carac_filtered[solo_col], errors='coerce').mean()
                 if pd.notna(solo_medio):
+                    # Converter de 0-1 para 0-100% se necessario
+                    if solo_medio <= 1:
+                        solo_medio = solo_medio * 100
                     # Inverso: menos solo exposto = melhor
                     cor = "inverse" if solo_medio > 20 else "normal"
                     st.metric("🏜️ Solo Exposto", formatar_porcentagem_br(solo_medio, 1), delta_color=cor)
         
         # Serapilheira
-        sera_col = encontrar_coluna(df_carac_filtered, ['serapilheira'])
+        sera_col = encontrar_coluna(df_carac_filtered, ['(%)serapilheira', '(%) serapilheira', 'serapilheira'])
         if sera_col and len(df_carac_filtered) > 0:
             with col_amb3:
                 sera_media = pd.to_numeric(df_carac_filtered[sera_col], errors='coerce').mean()
                 if pd.notna(sera_media):
+                    # Converter de 0-1 para 0-100% se necessario
+                    if sera_media <= 1:
+                        sera_media = sera_media * 100
                     cor = "normal" if sera_media >= 30 else "inverse"
                     st.metric("🍂 Serapilheira", formatar_porcentagem_br(sera_media, 1), delta_color=cor)
         
         # Gramíneas (invasoras)
-        gram_col = encontrar_coluna(df_carac_filtered, ['graminea'])
+        gram_col = encontrar_coluna(df_carac_filtered, ['(%)graminea', '(%) graminea', 'graminea'])
         if gram_col and len(df_carac_filtered) > 0:
             with col_amb4:
                 gram_media = pd.to_numeric(df_carac_filtered[gram_col], errors='coerce').mean()
                 if pd.notna(gram_media):
+                    # Converter de 0-1 para 0-100% se necessario
+                    if gram_media <= 1:
+                        gram_media = gram_media * 100
                     cor = "inverse" if gram_media > 30 else "normal"
                     st.metric("🌾 Gramíneas", formatar_porcentagem_br(gram_media, 1), delta_color=cor)
         
@@ -1154,11 +1295,15 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
             if coluna and len(df_carac_filtered) > 0:
                 valor = pd.to_numeric(df_carac_filtered[coluna], errors='coerce').mean()
                 if pd.notna(valor):
+                    # Converter de 0-1 para 0-100% se necessario
+                    if valor <= 1:
+                        valor = valor * 100
+                    
                     # Normalizar para 0-100 baseado no ideal
                     if ideal == "alto":
-                        score = valor  # Já é percentual
+                        score = valor  # Ja eh percentual
                         cor = '#2E8B57' if score >= 50 else '#FF6347'
-                    else:  # baixo é melhor
+                    else:  # baixo eh melhor
                         score = 100 - valor  # Inverter
                         cor = '#2E8B57' if score >= 70 else '#FF6347'
                     
@@ -1224,7 +1369,16 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
         
         # Verificar alertas de diversidade
         if especies_col and len(df_inv_filtered) > 0:
-            riqueza = df_inv_filtered[especies_col].nunique()
+            # Aplicar filtros: remover "Morto" e altura > 0.5m
+            df_especies_validas = df_inv_filtered[~df_inv_filtered[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+            ht_col_alert = encontrar_coluna(df_especies_validas, ['ht', 'altura', 'height'])
+            
+            if ht_col_alert:
+                alturas = pd.to_numeric(df_especies_validas[ht_col_alert], errors='coerce')
+                df_especies_validas = df_especies_validas[alturas > 0.5]
+            
+            riqueza = df_especies_validas[especies_col].nunique()
+            
             if riqueza < 10:
                 alertas.append({
                     'Tipo': '🌺 Biodiversidade',
@@ -1277,31 +1431,165 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
         st.markdown("---")
         st.write("**📋 Resumo Executivo do Reflorestamento**")
         
-        # Calcular score geral
-        scores = []
+        # Calcular score geral com pesos cientificos
+        scores_ponderados = []
+        pesos_totais = 0
         
-        # Score de estrutura (baseado na altura)
-        if ht_col and len(df_inv_filtered) > 0:
-            alturas = pd.to_numeric(df_inv_filtered[ht_col], errors='coerce').dropna()
-            if len(alturas) > 0:
-                altura_media = alturas.mean()
-                score_estrutura = min(100, (altura_media / 15) * 100)  # Normalizar para 15m como referência
-                scores.append(score_estrutura)
+        # === INDICADORES PRINCIPAIS (PESO 3) - METAS DE RESTAURAÇÃO ===
         
-        # Score de diversidade
-        if especies_col and len(df_inv_filtered) > 0:
-            riqueza = df_inv_filtered[especies_col].nunique()
-            score_diversidade = min(100, (riqueza / 50) * 100)  # Normalizar para 50 espécies como referência
-            scores.append(score_diversidade)
-        
-        # Score ambiental (baseado na cobertura de copa)
+        # 1. COBERTURA DE COPA NATIVA (Peso 3)
         if copa_col and len(df_carac_filtered) > 0:
             copa_media = pd.to_numeric(df_carac_filtered[copa_col], errors='coerce').mean()
             if pd.notna(copa_media):
-                scores.append(copa_media)
+                # Converter de 0-1 para 0-100% se necessario
+                if copa_media <= 1:
+                    copa_media = copa_media * 100
+                score_copa = min(100, copa_media)
+                scores_ponderados.append(score_copa * 3)  # Peso 3
+                pesos_totais += 3
         
-        if scores:
-            score_geral = sum(scores) / len(scores)
+        # 2. DENSIDADE DE REGENERANTES (Peso 3)
+        densidade_regenerantes = calcular_densidade_regenerantes(df_inv_filtered, df_carac_filtered)
+        if densidade_regenerantes > 0:
+            # Meta: 1500 ind/ha para restauracao assistida
+            score_densidade = min(100, (densidade_regenerantes / 1500) * 100)
+            scores_ponderados.append(score_densidade * 3)  # Peso 3
+            pesos_totais += 3
+        
+        # 3. RIQUEZA DE ESPECIES NATIVAS (Peso 3)
+        if especies_col and len(df_inv_filtered) > 0:
+            # Aplicar filtros: remover "Morto" e altura > 0.5m
+            df_especies_validas = df_inv_filtered[~df_inv_filtered[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+            ht_col_score = encontrar_coluna(df_especies_validas, ['ht', 'altura', 'height'])
+            
+            if ht_col_score:
+                alturas = pd.to_numeric(df_especies_validas[ht_col_score], errors='coerce')
+                df_especies_validas = df_especies_validas[alturas > 0.5]
+            
+            # Contar apenas especies nativas
+            origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
+            if origem_col:
+                df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+                riqueza_nativas = df_nativas[especies_col].nunique()
+                
+                # Obter meta específica da propriedade
+                meta_col = encontrar_coluna(df_inv_filtered, ['meta', 'meta_riqueza', 'riqueza_meta', 'meta_especies'])
+                if meta_col and len(df_inv_filtered) > 0:
+                    meta_riqueza = pd.to_numeric(df_inv_filtered[meta_col], errors='coerce').dropna()
+                    if len(meta_riqueza) > 0:
+                        meta_riqueza = meta_riqueza.iloc[0]  # Pegar primeiro valor único
+                    else:
+                        meta_riqueza = 30  # Valor padrão (consistente com outras funções)
+                else:
+                    meta_riqueza = 30  # Valor padrão (consistente com outras funções)
+                
+                score_riqueza = min(100, (riqueza_nativas / meta_riqueza) * 100)
+                scores_ponderados.append(score_riqueza * 3)  # Peso 3
+                pesos_totais += 3
+        
+        # === INDICADORES SECUNDARIOS POSITIVOS (PESO 1) ===
+        
+        # 4. SERAPILHEIRA (Peso 1) - Positivo
+        sera_col = encontrar_coluna(df_carac_filtered, ['(%)serapilheira', '(%) serapilheira', 'serapilheira'])
+        if sera_col and len(df_carac_filtered) > 0:
+            sera_media = pd.to_numeric(df_carac_filtered[sera_col], errors='coerce').mean()
+            if pd.notna(sera_media):
+                if sera_media <= 1:
+                    sera_media = sera_media * 100
+                score_serapilheira = min(100, sera_media)
+                scores_ponderados.append(score_serapilheira * 1)  # Peso 1
+                pesos_totais += 1
+        
+        # 5. HERBACEAS/PALHADA (Peso 1) - Positivo (se existir)
+        herb_col = encontrar_coluna(df_carac_filtered, ['(%)herbaceas', '(%) herbaceas', 'herbaceas', 'palhada'])
+        if herb_col and len(df_carac_filtered) > 0:
+            herb_media = pd.to_numeric(df_carac_filtered[herb_col], errors='coerce').mean()
+            if pd.notna(herb_media):
+                if herb_media <= 1:
+                    herb_media = herb_media * 100
+                score_herbaceas = min(100, herb_media)
+                scores_ponderados.append(score_herbaceas * 1)  # Peso 1
+                pesos_totais += 1
+        
+        # === INDICADORES SECUNDARIOS NEGATIVOS (PESO 1) ===
+        
+        # 6. GRAMINEAS INVASORAS (Peso 1) - Negativo
+        gram_col = encontrar_coluna(df_carac_filtered, ['(%)graminea', '(%) graminea', 'graminea'])
+        if gram_col and len(df_carac_filtered) > 0:
+            gram_media = pd.to_numeric(df_carac_filtered[gram_col], errors='coerce').mean()
+            if pd.notna(gram_media):
+                if gram_media <= 1:
+                    gram_media = gram_media * 100
+                score_gramineas = max(0, 100 - gram_media)  # Inverso: menos gramineas = melhor
+                scores_ponderados.append(score_gramineas * 1)  # Peso 1
+                pesos_totais += 1
+        
+        # 7. SOLO EXPOSTO (Peso 1) - Negativo
+        solo_col = encontrar_coluna(df_carac_filtered, ['(%)solo exposto', '(%) solo exposto', 'solo_exposto', 'solo exposto'])
+        if solo_col and len(df_carac_filtered) > 0:
+            solo_medio = pd.to_numeric(df_carac_filtered[solo_col], errors='coerce').mean()
+            if pd.notna(solo_medio):
+                if solo_medio <= 1:
+                    solo_medio = solo_medio * 100
+                score_solo = max(0, 100 - solo_medio)  # Inverso: menos solo exposto = melhor
+                scores_ponderados.append(score_solo * 1)  # Peso 1
+                pesos_totais += 1
+        
+        # 8. COBERTURA EXOTICA (Peso 1) - Negativo (se existir)
+        exot_col = encontrar_coluna(df_carac_filtered, ['(%)cobertura_exotica', '(%) cobertura_exotica', 'cobertura_exotica', 'exotica'])
+        if exot_col and len(df_carac_filtered) > 0:
+            exot_media = pd.to_numeric(df_carac_filtered[exot_col], errors='coerce').mean()
+            if pd.notna(exot_media):
+                if exot_media <= 1:
+                    exot_media = exot_media * 100
+                score_exotica = max(0, 100 - exot_media)  # Inverso: menos exoticas = melhor
+                scores_ponderados.append(score_exotica * 1)  # Peso 1
+                pesos_totais += 1
+        
+        if scores_ponderados and pesos_totais > 0:
+            score_geral = sum(scores_ponderados) / pesos_totais
+            
+            # Explicacao detalhada do Score Geral
+            st.info("""
+            **📊 Como é Calculado o Score Geral de Reflorestamento (0-100 pontos)**
+            
+            O Score Geral é uma **média ponderada** baseada na importância científica dos indicadores:
+            
+            **� INDICADORES PRINCIPAIS (Peso 3) - Metas de Restauração**
+            
+            **1. 🌳 Cobertura de Copa Nativa (Peso 3)**
+            - Meta principal de restauração (>80%)
+            - Fórmula: percentual direto de cobertura nativa
+            - Importância: Estrutura básica do ecossistema
+            
+            **2. 🌱 Densidade de Regenerantes (Peso 3)**
+            - Meta: >1.500 ind/ha (restauração assistida)
+            - Critério: indivíduos nativos jovens com altura >0.5m
+            - Importância: Capacidade de autorregeneração
+            
+            **3. 🌺 Riqueza de Espécies Nativas (Peso 3)**
+            - Meta: específica de cada propriedade (coluna 'meta')
+            - Fórmula: (riqueza_nativas ÷ meta_propriedade) × 100
+            - Importância: Diversidade funcional do ecossistema
+            
+            **🔧 INDICADORES SECUNDÁRIOS (Peso 1)**
+            
+            **Positivos (quanto maior, melhor):**
+            - 🍂 **Serapilheira**: Ciclagem de nutrientes
+            - 🌿 **Herbáceas/Palhada**: Proteção do solo
+            
+            **Negativos (quanto menor, melhor):**
+            - 🌾 **Gramíneas Invasoras**: Score = 100 - % gramíneas
+            - 🏜️ **Solo Exposto**: Score = 100 - % solo exposto  
+            - 🚫 **Cobertura Exótica**: Score = 100 - % exóticas
+            
+            **🎯 Sistema de Classificação Final:**
+            - **70-100 pts**: ✅ Excelente reflorestamento 
+            - **50-69 pts**: ⚠️ Bom desenvolvimento
+            - **0-49 pts**: ❌ Necessita atenção/intervenção
+            
+            *Nota: Score final = Σ(Score_indicador × Peso) ÷ Σ(Pesos)*
+            """)
             
             col_score1, col_score2, col_score3 = st.columns(3)
             
@@ -1319,8 +1607,24 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
             
             with col_score3:
                 if especies_col and len(df_inv_filtered) > 0:
-                    riqueza_atual = df_inv_filtered[especies_col].nunique()
-                    st.metric("🌺 Biodiversidade", f"{riqueza_atual} espécies")
+                    # Aplicar filtros: remover "Morto" e altura > 0.5m
+                    df_especies_validas = df_inv_filtered[~df_inv_filtered[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+                    ht_col_bio = encontrar_coluna(df_especies_validas, ['ht', 'altura', 'height'])
+                    
+                    if ht_col_bio:
+                        alturas = pd.to_numeric(df_especies_validas[ht_col_bio], errors='coerce')
+                        df_especies_validas = df_especies_validas[alturas > 0.5]
+                    
+                    riqueza_atual = df_especies_validas[especies_col].nunique()
+                    
+                    # Calcular riqueza de nativas
+                    origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
+                    if origem_col:
+                        df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+                        riqueza_nativas = df_nativas[especies_col].nunique()
+                        st.metric("🌺 Biodiversidade", f"{riqueza_atual} ({riqueza_nativas} nat.)")
+                    else:
+                        st.metric("🌺 Biodiversidade", f"{riqueza_atual} especies")
     
     st.markdown("---")
     
@@ -2649,7 +2953,7 @@ def calcular_indices_diversidade(df_inventario, propriedades_selecionadas):
             st.metric("🔄 Simpson (1-D)", f"{simpson_diversidade:.3f}")
         
         with col4:
-            st.metric("⚖️ Equitabilidade (J)", f"{equitabilidade:.3f}")
+            st.metric("⚖️ Pielou (J)", f"{equitabilidade:.3f}")
         
         # Interpretação dos índices
         with st.expander("📖 Interpretação dos Índices"):
@@ -2665,9 +2969,10 @@ def calcular_indices_diversidade(df_inventario, propriedades_selecionadas):
             - Varia de 0 a 1 (maior = mais diverso)
             - {'Alta' if simpson_diversidade > 0.8 else 'Média' if simpson_diversidade > 0.6 else 'Baixa'} diversidade
             
-            **⚖️ Equitabilidade de Pielou (J = {equitabilidade:.3f}):**
-            - Varia de 0 a 1 (maior = mais uniforme)
-            - {'Alta' if equitabilidade > 0.8 else 'Média' if equitabilidade > 0.6 else 'Baixa'} uniformidade
+            **⚖️ Índice de Pielou (J = {equitabilidade:.3f}):**
+            - Varia de 0 a 1 (maior = distribuicao mais uniforme)
+            - {'Alta' if equitabilidade > 0.8 else 'Media' if equitabilidade > 0.6 else 'Baixa'} equitabilidade
+            - Mede a uniformidade da distribuicao das especies
             """)
         
         # Gráfico de distribuição de abundância
@@ -2779,6 +3084,132 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
     
     # ABA 4: ANÁLISE POR UTs
     with tab4:
+        st.write("### Explicacao Detalhada dos Scores")
+        
+        with st.expander("📊 Como sao calculados os scores de monitoramento?", expanded=True):
+            st.markdown("""
+            #### 🌱 **Scores de Vegetacao (0-100 pontos cada)**
+            
+            **1. Riqueza de Especies Nativas** 🌺
+            - **O que mede**: Diversidade de especies nativas com altura > 0,5m
+            - **Como calcular**: 
+              - Conte especies nativas com altura > 0,5m
+              - Score = (numero_especies / meta_propriedade) × 100
+              - Maximo: 100 pontos (≥ meta da propriedade)
+            - **Interpretacao**:
+              - 0-20% da meta: Muito baixa diversidade
+              - 21-40% da meta: Baixa diversidade  
+              - 41-60% da meta: Diversidade moderada
+              - 61-80% da meta: Boa diversidade
+              - 81-100% da meta: Excelente diversidade
+            
+            **2. Densidade de Individuos Nativos** 🌳
+            - **O que mede**: Numero de arvores nativas por hectare
+            - **Como calcular**:
+              - Conte individuos nativos na area amostrada
+              - Extrapole para hectare: densidade = (individuos/area_ha)
+              - Score = (densidade / 2000) × 100
+              - Maximo: 100 pontos (≥2000 ind/ha)
+            - **Interpretacao**:
+              - 0-400 ind/ha (0-20 pts): Densidade muito baixa
+              - 401-800 ind/ha (21-40 pts): Densidade baixa
+              - 801-1200 ind/ha (41-60 pts): Densidade moderada
+              - 1201-1600 ind/ha (61-80 pts): Boa densidade
+              - 1601+ ind/ha (81-100 pts): Excelente densidade
+            
+            **3. Diversidade de Shannon (H')** 🌍
+            - **O que mede**: Diversidade considerando abundancia de especies
+            - **Como calcular**:
+              - H' = -Σ(pi × ln(pi)), onde pi = proporcao da especie i
+              - Score = (H' / 3) × 100
+              - Maximo: 100 pontos (H' ≥ 3.0)
+            - **Interpretacao**:
+              - H' < 1.0 (0-33 pts): Baixa diversidade
+              - H' 1.0-2.0 (34-66 pts): Diversidade moderada
+              - H' > 2.0 (67-100 pts): Alta diversidade
+            """)
+            
+            st.markdown("""
+            #### 🌍 **Scores de Indicadores Ambientais (0-100 pontos cada)**
+            
+            **1. Cobertura de Copa** 🌳 (Ideal: ALTO)
+            - **O que mede**: Percentual de cobertura vegetal
+            - **Como calcular**: Score = percentual_cobertura (direto)
+            - **Valores de referencia**:
+              - 0-30%: Cobertura insuficiente (vermelho)
+              - 31-50%: Cobertura baixa (amarelo)
+              - 51-70%: Cobertura adequada (verde claro)
+              - 71-100%: Cobertura excelente (verde escuro)
+            
+            **2. Solo Exposto** 🏜️ (Ideal: BAIXO)
+            - **O que mede**: Percentual de solo sem cobertura
+            - **Como calcular**: Score = 100 - percentual_solo_exposto
+            - **Valores de referencia**:
+              - 0-10% exposto (90-100 pts): Excelente
+              - 11-20% exposto (80-89 pts): Bom
+              - 21-40% exposto (60-79 pts): Moderado
+              - 41%+ exposto (<60 pts): Problematico
+            
+            **3. Serapilheira** 🍂 (Ideal: ALTO)
+            - **O que mede**: Cobertura de material organico no solo
+            - **Como calcular**: Score = percentual_serapilheira (direto)
+            - **Valores de referencia**:
+              - 60-100%: Excelente ciclagem de nutrientes
+              - 40-59%: Boa ciclagem
+              - 20-39%: Ciclagem moderada
+              - 0-19%: Ciclagem deficiente
+            
+            **4. Gramineas Invasoras** 🌾 (Ideal: BAIXO)
+            - **O que mede**: Cobertura de gramineas competidoras
+            - **Como calcular**: Score = 100 - percentual_gramineas
+            - **Valores de referencia**:
+              - 0-10% gramineas (90-100 pts): Controle excelente
+              - 11-25% gramineas (75-89 pts): Controle bom
+              - 26-50% gramineas (50-74 pts): Controle moderado
+              - 51%+ gramineas (<50 pts): Necessita intervencao
+            """)
+            
+            st.markdown("""
+            #### 🎯 **Score Final Integrado**
+            
+            **Calculo do Score Geral**:
+            - Score Final = (Score_Riqueza + Score_Densidade + Score_Shannon + Score_Copa + Score_Solo + Score_Serapilheira + Score_Gramineas) / 7
+            - Media ponderada de todos os indicadores
+            
+            **Classificacao do Sucesso da Restauracao**:
+            - 🟢 **85-100 pontos**: Restauracao de EXCELENCIA
+              - Todos os indicadores em niveis otimos
+              - Area se aproxima de floresta madura
+              - Manutencao minima necessaria
+            
+            - 🟢 **70-84 pontos**: Restauracao BEM-SUCEDIDA  
+              - Maioria dos indicadores adequados
+              - Desenvolvimento satisfatorio
+              - Monitoramento de rotina
+            
+            - 🟡 **50-69 pontos**: Restauracao em DESENVOLVIMENTO
+              - Indicadores mistos, alguns adequados
+              - Necessita intervencoes pontuais
+              - Monitoramento frequente
+            
+            - 🟠 **30-49 pontos**: Restauracao com DIFICULDADES
+              - Varios indicadores abaixo do esperado
+              - Necessita intervencoes significativas
+              - Revisao da estrategia
+            
+            - 🔴 **0-29 pontos**: Restauracao CRITICA
+              - Maioria dos indicadores inadequados
+              - Necessita intervencao urgente
+              - Possivel replantio ou enriquecimento
+            
+            **Fatores que Influenciam o Score**:
+            - Qualidade do plantio inicial
+            - Adequacao das especies ao local
+            - Condicoes climaticas
+            - Manutencao e manejo pos-plantio
+            - Pressoes externas (fogo, gado, etc.)
+            """)
+        
         exibir_analise_por_uts(df_caracterizacao, df_inventario)
 
 def calcular_indicadores_restauracao(df_caracterizacao, df_inventario):
@@ -2868,22 +3299,32 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         resultado['meta_densidade'] = meta_densidade
         resultado['densidade_adequada'] = densidade >= meta_densidade
         
-        # === 3. RIQUEZA DE ESPÉCIES ===
+        # === 3. RIQUEZA DE ESPECIES ===
         especies_col = encontrar_coluna(df_inv_prop, ['especies', 'especie', 'species', 'sp'])
         if especies_col and len(df_inv_prop) > 0:
-            # Filtrar espécies válidas (remover "Morto/Morta")
+            # Filtrar especies validas (remover "Morto/Morta")
             df_especies_validas = df_inv_prop[~df_inv_prop[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
             
-            # Riqueza total (todas as espécies exceto "Morto")
-            riqueza_observada = df_especies_validas[especies_col].nunique()
-            
-            # Riqueza de espécies nativas
+            # Filtrar apenas especies nativas
             origem_col = encontrar_coluna(df_especies_validas, ['origem', 'origin', 'procedencia'])
             if origem_col:
                 df_nativas = df_especies_validas[df_especies_validas[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
-                riqueza_nativas = df_nativas[especies_col].nunique()
             else:
-                riqueza_nativas = 0
+                df_nativas = df_especies_validas
+            
+            # Filtrar apenas individuos com altura > 0.5m
+            ht_col = encontrar_coluna(df_nativas, ['ht', 'altura', 'height'])
+            if ht_col:
+                alturas = pd.to_numeric(df_nativas[ht_col], errors='coerce')
+                df_nativas_altura = df_nativas[alturas > 0.5]
+            else:
+                df_nativas_altura = df_nativas
+            
+            # Riqueza observada = especies nativas com altura > 0.5m
+            riqueza_observada = df_nativas_altura[especies_col].nunique()
+            
+            # Riqueza de especies nativas (todas as alturas)
+            riqueza_nativas = df_nativas[especies_col].nunique()
         else:
             riqueza_observada = 0
             riqueza_nativas = 0
@@ -2892,7 +3333,7 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         resultado['riqueza_nativas'] = riqueza_nativas
         
         # Obter meta de riqueza (baseada em espécies nativas)
-        meta_riqueza_col = encontrar_coluna(df_inv_prop, ['meta_riqueza', 'riqueza_meta', 'meta_especies'])
+        meta_riqueza_col = encontrar_coluna(df_inv_prop, ['meta', 'meta_riqueza', 'riqueza_meta', 'meta_especies'])
         if meta_riqueza_col and len(df_inv_prop) > 0:
             meta_riqueza = pd.to_numeric(df_inv_prop[meta_riqueza_col], errors='coerce').dropna()
             if len(meta_riqueza) > 0:
@@ -2903,8 +3344,8 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
             meta_riqueza = 30  # Valor padrao
         
         resultado['meta_riqueza'] = meta_riqueza
-        # Meta baseada em espécies nativas
-        resultado['riqueza_adequada'] = riqueza_nativas >= meta_riqueza
+        # Meta baseada em espécies nativas com altura > 0.5m (critério observado)
+        resultado['riqueza_adequada'] = riqueza_observada >= meta_riqueza
         
         # === 4. STATUS GERAL ===
         status_count = sum([
@@ -3066,8 +3507,11 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
         st.warning("Sem dados para análise de riqueza")
         return
     
+    # Ordenar dados por meta de riqueza (maior para menor) para organizar o gráfico
+    dados_ordenados = dados_restauracao.sort_values('meta_riqueza', ascending=False).reset_index(drop=True)
+    
     # Gráfico de barras agrupadas - observado vs meta
-    df_riqueza_plot = dados_restauracao[['cod_prop', 'riqueza_observada', 'meta_riqueza']].melt(
+    df_riqueza_plot = dados_ordenados[['cod_prop', 'riqueza_observada', 'meta_riqueza']].melt(
         id_vars='cod_prop',
         value_vars=['riqueza_observada', 'meta_riqueza'],
         var_name='Tipo',
@@ -3083,15 +3527,19 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
     num_props = len(dados_restauracao)
     fig_width = max(800, num_props * 100)  # Mínimo 800px, 100px por propriedade
     
+    # Criar lista ordenada de propriedades para manter a ordem no gráfico
+    ordem_propriedades = dados_ordenados['cod_prop'].tolist()
+    
     fig_riqueza = px.bar(
         df_riqueza_plot,
         x='cod_prop',
         y='Riqueza',
         color='Tipo',
         barmode='group',
-        title='Riqueza de Espécies: Observada vs Meta',
+        title='Riqueza de Espécies: Observada vs Meta (Ordenado por Meta Decrescente)',
         labels={'Riqueza': 'Número de Espécies', 'cod_prop': 'Propriedade'},
-        color_discrete_map={'Observada': '#4CAF50', 'Meta': '#FF9800'}
+        color_discrete_map={'Observada': '#4CAF50', 'Meta': '#FF9800'},
+        category_orders={'cod_prop': ordem_propriedades}
     )
     
     # Configurar layout para permitir scroll horizontal
@@ -3123,10 +3571,10 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
     
     # Verificar se existe coluna de riqueza nativas
     colunas_resumo = ['cod_prop', 'riqueza_observada', 'meta_riqueza', 'riqueza_adequada']
-    if 'riqueza_nativas' in dados_restauracao.columns:
+    if 'riqueza_nativas' in dados_ordenados.columns:
         colunas_resumo.insert(2, 'riqueza_nativas')
     
-    df_resumo_riqueza = dados_restauracao[colunas_resumo].copy()
+    df_resumo_riqueza = dados_ordenados[colunas_resumo].copy()
     df_resumo_riqueza['Status'] = df_resumo_riqueza['riqueza_adequada'].apply(
         lambda x: '✅ Adequada' if x else '⚠️ Abaixo da Meta'
     )
@@ -3145,7 +3593,7 @@ def exibir_analise_riqueza_especies(dados_restauracao, df_inventario):
     st.dataframe(df_resumo_riqueza, use_container_width=True)
     
     # Informação sobre os critérios
-    st.info("💡 **Critérios:** Meta baseada em espécies nativas. Espécies 'Morto/Morta' excluídas de todas as análises.")
+    st.info("💡 **Critérios:** Meta baseada em espécies nativas com altura > 0.5m. Espécies 'Morto/Morta' excluídas de todas as análises.")
 
 def exibir_analise_por_uts(df_caracterizacao, df_inventario):
     """Exibe análise detalhada por UTs dentro das propriedades"""
