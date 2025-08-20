@@ -319,7 +319,9 @@ def show_descriptive_stats(df_carac, df_inv, title):
         with col3:
             # Densidade de indivíduos regenerantes
             if len(df_inv) > 0 and len(df_carac) > 0:
+                # Adicionar botão de debug apenas para Inventário
                 densidade = calcular_densidade_regenerantes(df_inv, df_carac)
+                
                 metric_compacta("Dens. Regen.", formatar_densidade_br(densidade))
             else:
                 metric_compacta("Dens. Regen.", formatar_densidade_br(0))
@@ -621,49 +623,140 @@ def calcular_densidade_regenerantes(df_inv, df_carac):
         if len(df_inv) == 0 or len(df_carac) == 0:
             return 0.0
             
+        # === DEBUG: DataFrame inicial ===
+        if debug:
+            st.write("### 🔍 DEBUG - Densidade de Regenerantes")
+            st.write(f"**DataFrame inicial:** {len(df_inv)} registros")
+            
         # Aplicar filtros específicos
         df_filtrado = df_inv.copy()
         
         # 1. Remover "Morto/Morta"
         especies_col = encontrar_coluna(df_filtrado, ['especies', 'especie', 'species', 'sp'])
         if especies_col:
+            antes_morto = len(df_filtrado)
             df_filtrado = df_filtrado[~df_filtrado[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
+            if debug:
+                st.write(f"**1. Após remover 'Morto/Morta':** {len(df_filtrado)} registros (removidos: {antes_morto - len(df_filtrado)})")
         
         # 2. Filtrar apenas origem "Nativa"
         origem_col = encontrar_coluna(df_filtrado, ['origem', 'origin', 'procedencia'])
         if origem_col:
+            antes_origem = len(df_filtrado)
             df_filtrado = df_filtrado[df_filtrado[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
+            if debug:
+                st.write(f"**2. Após filtrar origem 'Nativa':** {len(df_filtrado)} registros (removidos: {antes_origem - len(df_filtrado)})")
         
         # 3. Filtrar idade "Jovem"
         idade_col = encontrar_coluna(df_filtrado, ['idade', 'age', 'class_idade'])
         if idade_col:
+            antes_idade = len(df_filtrado)
             df_filtrado = df_filtrado[df_filtrado[idade_col].astype(str).str.contains('Jovem', case=False, na=False)]
+            if debug:
+                st.write(f"**3. Após filtrar idade 'Jovem':** {len(df_filtrado)} registros (removidos: {antes_idade - len(df_filtrado)})")
         
         # 4. Filtrar altura > 0.5
         ht_col = encontrar_coluna(df_filtrado, ['ht', 'altura', 'height', 'h'])
         if ht_col:
+            antes_altura = len(df_filtrado)
             alturas = pd.to_numeric(df_filtrado[ht_col], errors='coerce')
-            df_filtrado = df_filtrado[alturas > 0.5]
+            df_filtrado = df_filtrado[alturas >= 0.499]
+            if debug:
+                st.write(f"**4. Após filtrar altura > 0.5m:** {len(df_filtrado)} registros (removidos: {antes_altura - len(df_filtrado)})")
         
         if len(df_filtrado) == 0:
+            if debug:
+                st.error("❌ Nenhum registro restou após aplicar todos os filtros!")
             return 0.0
+        
+        # === DEBUG: Mostrar dados filtrados ===
+        if debug:
+            st.write("### 📋 Registros Selecionados para Cálculo")
+            
+            # Colunas relevantes para mostrar
+            colunas_debug = ['plaqueta', 'plaq', 'id', especies_col, origem_col, idade_col, ht_col, 'cod_parc', 'parcela', 'area_ha']
+            colunas_existentes = [col for col in colunas_debug if col and col in df_filtrado.columns]
+            
+            if colunas_existentes:
+                st.dataframe(df_filtrado[colunas_existentes], use_container_width=True)
+            else:
+                st.dataframe(df_filtrado, use_container_width=True)
         
         # Contar indivíduos regenerantes válidos
         plaqueta_col = encontrar_coluna(df_filtrado, ['plaqueta', 'plaq', 'id'])
         if plaqueta_col:
             num_regenerantes = df_filtrado[plaqueta_col].nunique()
+            if debug:
+                st.write(f"**Indivíduos únicos por plaqueta:** {num_regenerantes}")
+                
+                # Mostrar contagem por plaqueta
+                contagem_plaquetas = df_filtrado[plaqueta_col].value_counts().head(20)
+                st.write("**Top 20 plaquetas com mais registros:**")
+                st.dataframe(contagem_plaquetas.reset_index())
+                
+                # Comparação com seus valores
+                st.write("### 🔄 Comparação com Cálculo Manual")
+                st.write(f"**Seus valores:** 309 indivíduos ÷ 0,17 ha = 1.817,647 ind/ha")
+                
+                # Calcular diferenças
+                diferenca_individuos = num_regenerantes - 309
+                st.write(f"**Dashboard:** {num_regenerantes} indivíduos")
+                st.write(f"**Diferença em indivíduos:** {diferenca_individuos:+d}")
+                
+                if abs(diferenca_individuos) > 0:
+                    st.warning(f"⚠️ **POSSÍVEL CAUSA**: Diferença de {abs(diferenca_individuos)} indivíduos")
+                    if diferenca_individuos < 0:
+                        st.write("- Alguns indivíduos foram removidos pelos filtros do dashboard")
+                        st.write("- Verifique se há 'Morto/Morta', espécies não-nativas, idades não-jovens, ou alturas ≤ 0.5m")
+                    else:
+                        st.write("- Dashboard está contando mais indivíduos que seu cálculo")
         else:
             num_regenerantes = len(df_filtrado)
+            if debug:
+                st.write(f"**Contagem total de registros (sem plaqueta):** {num_regenerantes}")
         
         # Calcular área amostrada usando método adaptativo
         area_ha, metodo = calcular_area_amostrada(df_carac, df_inv)
         
+        if debug:
+            st.write(f"**Área calculada:** {area_ha:.6f} ha")
+            st.write(f"**Método usado:** {metodo}")
+            
+            # Comparação detalhada de área
+            diferenca_area = area_ha - 0.17
+            st.write(f"**Área esperada:** 0,17 ha")
+            st.write(f"**Diferença em área:** {diferenca_area:+.6f} ha")
+            
+            if abs(diferenca_area) > 0.001:
+                st.warning(f"⚠️ **POSSÍVEL CAUSA**: Diferença de {abs(diferenca_area):.6f} ha na área")
+                st.write(f"- Método do dashboard: {metodo}")
+                st.write("- Verifique se o método de cálculo de área está correto")
+        
         if area_ha > 0:
             densidade = num_regenerantes / area_ha
+            if debug:
+                st.write("### 📊 Análise Final das Diferenças")
+                densidade_manual = 309 / 0.17
+                diferenca_densidade = densidade - densidade_manual
+                
+                st.write(f"**Cálculo manual:** 309 ÷ 0,17 = {densidade_manual:.1f} ind/ha")
+                st.write(f"**Cálculo dashboard:** {num_regenerantes} ÷ {area_ha:.6f} = **{densidade:.1f} ind/ha**")
+                st.write(f"**Diferença final:** {diferenca_densidade:+.1f} ind/ha")
+                
+                # Determinar causa principal
+                if abs(diferenca_individuos) > abs(diferenca_area * 1000):
+                    st.error("🎯 **CAUSA PRINCIPAL**: Diferença no número de indivíduos contados")
+                elif abs(diferenca_area) > 0.001:
+                    st.error("🎯 **CAUSA PRINCIPAL**: Diferença no cálculo da área")
+                else:
+                    st.success("✅ **VALORES PRÓXIMOS**: Pequenas diferenças de arredondamento")
+            
             return densidade
         
         return 0.0
     except Exception as e:
+        if debug:
+            st.error(f"Erro no cálculo de densidade: {e}")
         st.warning(f"Erro no cálculo de densidade: {e}")
         return 0.0
 
@@ -3027,16 +3120,6 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
         st.warning("⚠️ Nenhum dado disponível para análise dos indicadores de restauração.")
         return
     
-    # Adicionar seção de debug
-    if st.checkbox("🔍 Ativar Debug para Densidade de Regenerantes"):
-        st.markdown("---")
-        st.markdown("### 🔍 Debug - Densidade de Regenerantes")
-        
-        # Calcular com debug ativado
-        densidade_debug = calcular_densidade_regenerantes(df_inventario, df_caracterizacao, debug=True)
-
-        st.markdown("---")
-
     # Obter dados por propriedade
     dados_restauracao = calcular_indicadores_restauracao(df_caracterizacao, df_inventario)
 
@@ -3389,18 +3472,13 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
         st.error(f"Erro ao calcular indicadores para propriedade {cod_prop}: {e}")
         return None
 
-def calcular_densidade_regenerantes(df_inv, df_carac, debug=False):
+def calcular_densidade_regenerantes(df_inv, df_carac):
     """Calcula a densidade de indivíduos regenerantes seguindo critérios específicos"""
     try:
         # Verificar se há dados
         if len(df_inv) == 0 or len(df_carac) == 0:
             return 0.0
-            
-        # === DEBUG: DataFrame inicial ===
-        if debug:
-            st.write("### 🔍 DEBUG - Densidade de Regenerantes")
-            st.write(f"**DataFrame inicial:** {len(df_inv)} registros")
-            
+                        
         # Aplicar filtros específicos
         df_filtrado = df_inv.copy()
         
@@ -3409,85 +3487,46 @@ def calcular_densidade_regenerantes(df_inv, df_carac, debug=False):
         if especies_col:
             antes_morto = len(df_filtrado)
             df_filtrado = df_filtrado[~df_filtrado[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
-            if debug:
-                st.write(f"**1. Após remover 'Morto/Morta':** {len(df_filtrado)} registros (removidos: {antes_morto - len(df_filtrado)})")
-        
+
         # 2. Filtrar apenas origem "Nativa"
         origem_col = encontrar_coluna(df_filtrado, ['origem', 'origin', 'procedencia'])
         if origem_col:
             antes_origem = len(df_filtrado)
             df_filtrado = df_filtrado[df_filtrado[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
-            if debug:
-                st.write(f"**2. Após filtrar origem 'Nativa':** {len(df_filtrado)} registros (removidos: {antes_origem - len(df_filtrado)})")
-        
+
         # 3. Filtrar idade "Jovem"
         idade_col = encontrar_coluna(df_filtrado, ['idade', 'age', 'class_idade'])
         if idade_col:
             antes_idade = len(df_filtrado)
             df_filtrado = df_filtrado[df_filtrado[idade_col].astype(str).str.contains('Jovem', case=False, na=False)]
-            if debug:
-                st.write(f"**3. Após filtrar idade 'Jovem':** {len(df_filtrado)} registros (removidos: {antes_idade - len(df_filtrado)})")
-        
+
         # 4. Filtrar altura > 0.5
         ht_col = encontrar_coluna(df_filtrado, ['ht', 'altura', 'height', 'h'])
         if ht_col:
             antes_altura = len(df_filtrado)
             alturas = pd.to_numeric(df_filtrado[ht_col], errors='coerce')
-            df_filtrado = df_filtrado[alturas > 0.5]
-            if debug:
-                st.write(f"**4. Após filtrar altura > 0.5m:** {len(df_filtrado)} registros (removidos: {antes_altura - len(df_filtrado)})")
-        
+            df_filtrado = df_filtrado[alturas >= 0.499]
+ 
         if len(df_filtrado) == 0:
-            if debug:
-                st.error("❌ Nenhum registro restou após aplicar todos os filtros!")
-            return 0.0
-        
-        # === DEBUG: Mostrar dados filtrados ===
-        if debug:
-            st.write("### 📋 Registros Selecionados para Cálculo")
-            
-            # Colunas relevantes para mostrar
-            colunas_debug = ['plaqueta', 'plaq', 'id', especies_col, origem_col, idade_col, ht_col, 'cod_parc', 'parcela', 'area_ha']
-            colunas_existentes = [col for col in colunas_debug if col and col in df_filtrado.columns]
-            
-            if colunas_existentes:
-                st.dataframe(df_filtrado[colunas_existentes], use_container_width=True)
-            else:
-                st.dataframe(df_filtrado, use_container_width=True)
+            return 0.0                
         
         # Contar indivíduos regenerantes válidos
         plaqueta_col = encontrar_coluna(df_filtrado, ['plaqueta', 'plaq', 'id'])
         if plaqueta_col:
             num_regenerantes = df_filtrado[plaqueta_col].nunique()
-            if debug:
-                st.write(f"**Indivíduos únicos por plaqueta:** {num_regenerantes}")
-                
-                # Mostrar contagem por plaqueta
-                contagem_plaquetas = df_filtrado[plaqueta_col].value_counts().head(10)
-                st.write("**Top 10 plaquetas com mais registros:**")
-                st.dataframe(contagem_plaquetas.reset_index())
+
         else:
             num_regenerantes = len(df_filtrado)
-            if debug:
-                st.write(f"**Contagem total de registros (sem plaqueta):** {num_regenerantes}")
-        
+
         # Calcular área amostrada usando método adaptativo
         area_ha, metodo = calcular_area_amostrada(df_carac, df_inv)
         
-        if debug:
-            st.write(f"**Área calculada:** {area_ha:.6f} ha")
-            st.write(f"**Método usado:** {metodo}")
-        
         if area_ha > 0:
             densidade = num_regenerantes / area_ha
-            if debug:
-                st.write(f"**Cálculo final:** {num_regenerantes} ÷ {area_ha:.6f} = **{densidade:.1f} ind/ha**")
             return densidade
         
         return 0.0
     except Exception as e:
-        if debug:
-            st.error(f"Erro no cálculo de densidade: {e}")
         st.warning(f"Erro no cálculo de densidade: {e}")
         return 0.0
 
