@@ -910,7 +910,7 @@ def pagina_dashboard_principal(df_caracterizacao, df_inventario):
     # ============================================
     
     st.header("🎯 Indicadores de Restauração Florestal")
-    st.markdown("*Monitoramento das metas de reparação do desastre ambiental*")
+    st.markdown("*Monitoramento das metas de reparação ambiental*")
     
     # Informações sobre as metas
     with st.expander("ℹ️ Sobre as Metas de Restauração"):
@@ -3078,11 +3078,10 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
             st.metric("Riqueza Adequada", "N/A")
     
     # === ABAS DE ANÁLISE ===
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "🌿 Cobertura de Copa",
         "🌱 Densidade de Regenerantes", 
-        "🌳 Riqueza de Espécies",
-        "📊 Análise por UTs"
+        "🌳 Riqueza de Espécies"
     ])
     
     # ABA 1: COBERTURA DE COPA
@@ -3097,136 +3096,6 @@ def exibir_indicadores_restauracao(df_caracterizacao, df_inventario):
     with tab3:
         exibir_analise_riqueza_especies(dados_restauracao, df_inventario)
     
-    # ABA 4: ANÁLISE POR UTs
-    with tab4:
-        st.write("### Explicacao Detalhada dos Scores")
-        
-        with st.expander("📊 Como sao calculados os scores de monitoramento?", expanded=True):
-            st.markdown("""
-            #### 🌱 **Scores de Vegetacao (0-100 pontos cada)**
-            
-            **1. Riqueza de Especies Nativas** 🌺
-            - **O que mede**: Diversidade de especies nativas com altura > 0,5m
-            - **Como calcular**: 
-              - Conte especies nativas com altura > 0,5m
-              - Score = (numero_especies / meta_propriedade) × 100
-              - Maximo: 100 pontos (≥ meta da propriedade)
-            - **Interpretacao**:
-              - 0-20% da meta: Muito baixa diversidade
-              - 21-40% da meta: Baixa diversidade  
-              - 41-60% da meta: Diversidade moderada
-              - 61-80% da meta: Boa diversidade
-              - 81-100% da meta: Excelente diversidade
-            
-            **2. Densidade de Individuos Nativos** 🌳
-            - **O que mede**: Numero de arvores nativas por hectare
-            - **Como calcular**:
-              - Conte individuos nativos na area amostrada
-              - Extrapole para hectare: densidade = (individuos/area_ha)
-              - Score = (densidade / 2000) × 100
-              - Maximo: 100 pontos (≥2000 ind/ha)
-            - **Interpretacao**:
-              - 0-400 ind/ha (0-20 pts): Densidade muito baixa
-              - 401-800 ind/ha (21-40 pts): Densidade baixa
-              - 801-1200 ind/ha (41-60 pts): Densidade moderada
-              - 1201-1600 ind/ha (61-80 pts): Boa densidade
-              - 1601+ ind/ha (81-100 pts): Excelente densidade
-            
-            **3. Diversidade de Shannon (H')** 🌍
-            - **O que mede**: Diversidade considerando abundancia de especies
-            - **Como calcular**:
-              - H' = -Σ(pi × ln(pi)), onde pi = proporcao da especie i
-              - Score = (H' / 3) × 100
-              - Maximo: 100 pontos (H' ≥ 3.0)
-            - **Interpretacao**:
-              - H' < 1.0 (0-33 pts): Baixa diversidade
-              - H' 1.0-2.0 (34-66 pts): Diversidade moderada
-              - H' > 2.0 (67-100 pts): Alta diversidade
-            """)
-            
-            st.markdown("""
-            #### 🌍 **Scores de Indicadores Ambientais (0-100 pontos cada)**
-            
-            **1. Cobertura de Copa** 🌳 (Ideal: ALTO)
-            - **O que mede**: Percentual de cobertura vegetal
-            - **Como calcular**: Score = percentual_cobertura (direto)
-            - **Valores de referencia**:
-              - 0-30%: Cobertura insuficiente (vermelho)
-              - 31-50%: Cobertura baixa (amarelo)
-              - 51-70%: Cobertura adequada (verde claro)
-              - 71-100%: Cobertura excelente (verde escuro)
-            
-            **2. Solo Exposto** 🏜️ (Ideal: BAIXO)
-            - **O que mede**: Percentual de solo sem cobertura
-            - **Como calcular**: Score = 100 - percentual_solo_exposto
-            - **Valores de referencia**:
-              - 0-10% exposto (90-100 pts): Excelente
-              - 11-20% exposto (80-89 pts): Bom
-              - 21-40% exposto (60-79 pts): Moderado
-              - 41%+ exposto (<60 pts): Problematico
-            
-            **3. Serapilheira** 🍂 (Ideal: ALTO)
-            - **O que mede**: Cobertura de material organico no solo
-            - **Como calcular**: Score = percentual_serapilheira (direto)
-            - **Valores de referencia**:
-              - 60-100%: Excelente ciclagem de nutrientes
-              - 40-59%: Boa ciclagem
-              - 20-39%: Ciclagem moderada
-              - 0-19%: Ciclagem deficiente
-            
-            **4. Gramineas Invasoras** 🌾 (Ideal: BAIXO)
-            - **O que mede**: Cobertura de gramineas competidoras
-            - **Como calcular**: Score = 100 - percentual_gramineas
-            - **Valores de referencia**:
-              - 0-10% gramineas (90-100 pts): Controle excelente
-              - 11-25% gramineas (75-89 pts): Controle bom
-              - 26-50% gramineas (50-74 pts): Controle moderado
-              - 51%+ gramineas (<50 pts): Necessita intervencao
-            """)
-            
-            st.markdown("""
-            #### 🎯 **Score Final Integrado**
-            
-            **Calculo do Score Geral**:
-            - Score Final = (Score_Riqueza + Score_Densidade + Score_Shannon + Score_Copa + Score_Solo + Score_Serapilheira + Score_Gramineas) / 7
-            - Media ponderada de todos os indicadores
-            
-            **Classificacao do Sucesso da Restauracao**:
-            - 🟢 **85-100 pontos**: Restauracao de EXCELENCIA
-              - Todos os indicadores em niveis otimos
-              - Area se aproxima de floresta madura
-              - Manutencao minima necessaria
-            
-            - 🟢 **70-84 pontos**: Restauracao BEM-SUCEDIDA  
-              - Maioria dos indicadores adequados
-              - Desenvolvimento satisfatorio
-              - Monitoramento de rotina
-            
-            - 🟡 **50-69 pontos**: Restauracao em DESENVOLVIMENTO
-              - Indicadores mistos, alguns adequados
-              - Necessita intervencoes pontuais
-              - Monitoramento frequente
-            
-            - 🟠 **30-49 pontos**: Restauracao com DIFICULDADES
-              - Varios indicadores abaixo do esperado
-              - Necessita intervencoes significativas
-              - Revisao da estrategia
-            
-            - 🔴 **0-29 pontos**: Restauracao CRITICA
-              - Maioria dos indicadores inadequados
-              - Necessita intervencao urgente
-              - Possivel replantio ou enriquecimento
-            
-            **Fatores que Influenciam o Score**:
-            - Qualidade do plantio inicial
-            - Adequacao das especies ao local
-            - Condicoes climaticas
-            - Manutencao e manejo pos-plantio
-            - Pressoes externas (fogo, gado, etc.)
-            """)
-        
-        exibir_analise_por_uts(df_caracterizacao, df_inventario)
-
 def calcular_indicadores_restauracao(df_caracterizacao, df_inventario):
     """Calcula os indicadores de restauração por propriedade"""
     try:
@@ -3383,64 +3252,6 @@ def calcular_indicadores_propriedade(cod_prop, df_caracterizacao, df_inventario)
     except Exception as e:
         st.error(f"Erro ao calcular indicadores para propriedade {cod_prop}: {e}")
         return None
-
-def calcular_densidade_regenerantes(df_inv, df_carac):
-    """Calcula a densidade de indivíduos regenerantes seguindo critérios específicos"""
-    try:
-        # Verificar se há dados
-        if len(df_inv) == 0 or len(df_carac) == 0:
-            return 0.0
-                        
-        # Aplicar filtros específicos
-        df_filtrado = df_inv.copy()
-        
-        # 1. Remover "Morto/Morta"
-        especies_col = encontrar_coluna(df_filtrado, ['especies', 'especie', 'species', 'sp'])
-        if especies_col:
-            antes_morto = len(df_filtrado)
-            df_filtrado = df_filtrado[~df_filtrado[especies_col].astype(str).str.contains('Morto|Morta', case=False, na=False)]
-
-        # 2. Filtrar apenas origem "Nativa"
-        origem_col = encontrar_coluna(df_filtrado, ['origem', 'origin', 'procedencia'])
-        if origem_col:
-            antes_origem = len(df_filtrado)
-            df_filtrado = df_filtrado[df_filtrado[origem_col].astype(str).str.contains('Nativa', case=False, na=False)]
-
-        # 3. Filtrar idade "Jovem"
-        idade_col = encontrar_coluna(df_filtrado, ['idade', 'age', 'class_idade'])
-        if idade_col:
-            antes_idade = len(df_filtrado)
-            df_filtrado = df_filtrado[df_filtrado[idade_col].astype(str).str.contains('Jovem', case=False, na=False)]
-
-        # 4. Filtrar altura > 0.5
-        ht_col = encontrar_coluna(df_filtrado, ['ht', 'altura', 'height', 'h'])
-        if ht_col:
-            antes_altura = len(df_filtrado)
-            alturas = pd.to_numeric(df_filtrado[ht_col], errors='coerce')
-            df_filtrado = df_filtrado[alturas >= 0.499]
- 
-        if len(df_filtrado) == 0:
-            return 0.0                
-        
-        # Contar indivíduos regenerantes válidos
-        plaqueta_col = encontrar_coluna(df_filtrado, ['plaqueta', 'plaq', 'id'])
-        if plaqueta_col:
-            num_regenerantes = df_filtrado[plaqueta_col].nunique()
-
-        else:
-            num_regenerantes = len(df_filtrado)
-
-        # Calcular área amostrada usando método adaptativo
-        area_ha, metodo = calcular_area_amostrada(df_carac, df_inv)
-        
-        if area_ha > 0:
-            densidade = num_regenerantes / area_ha
-            return densidade
-        
-        return 0.0
-    except Exception as e:
-        st.warning(f"Erro no cálculo de densidade: {e}")
-        return 0.0
 
 def exibir_analise_cobertura_copa(dados_restauracao, df_caracterizacao):
     """Exibe análise específica da cobertura de copa"""
